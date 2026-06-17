@@ -1,5 +1,10 @@
 # The Cardboard Box (`cbox`)
 
+[![CI](https://github.com/Rynaro/cardboard-box/actions/workflows/ci.yml/badge.svg)](https://github.com/Rynaro/cardboard-box/actions/workflows/ci.yml)
+[![Release](https://github.com/Rynaro/cardboard-box/actions/workflows/release.yml/badge.svg)](https://github.com/Rynaro/cardboard-box/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/Rynaro/cardboard-box?sort=semver)](https://github.com/Rynaro/cardboard-box/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **A cozy distrobox manager** — Vagrant-inspired declarative box provisioning, a beautiful terminal cockpit, and a clean CLI for everyone.
 
 `cbox` raises `distrobox` from an advanced-user tool to "just works": single static binary, zero external scripting, and a docker-access spectrum from fully-decoupled to host-Docker-visible to isolated-nested. All three implementation phases are complete: CLI lifecycle, Boxfile-driven provisioning, and a TUI that dogfoots the same mechanisms.
