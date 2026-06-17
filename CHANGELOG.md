@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/Rynaro/cardboard-box/compare/v0.3.0...v0.3.1) (2026-06-17)
+
+
+### Bug Fixes
+
+* expand XDG state path when writing provision state ([#7](https://github.com/Rynaro/cardboard-box/issues/7)) ([501e5fb](https://github.com/Rynaro/cardboard-box/commit/501e5fbc91ac2631b87ce4a362e4068549fb8ae2))
+
 ## [0.3.0](https://github.com/Rynaro/cardboard-box/compare/v0.2.1...v0.3.0) (2026-06-17)
 
 
