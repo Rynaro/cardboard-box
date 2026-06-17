@@ -414,6 +414,57 @@ fn test_build_state_write_argv_escaping() {
     );
 }
 
+// Regression: paths must be double-quoted so the shell expands ${XDG_STATE_HOME:-…}.
+// Single-quoting prevents expansion and creates literal junk directories (bug regression).
+#[test]
+fn test_build_state_write_argv_paths_double_quoted() {
+    use cbox::dbox::argv::build_state_write_argv;
+
+    let json = r#"{"steps":[]}"#;
+    let args = build_state_write_argv("my-box", json);
+    let sh_cmd = &args[6];
+
+    // The XDG path must be wrapped in double quotes, not single quotes, so the
+    // shell expands ${XDG_STATE_HOME:-$HOME/.local/state} at runtime.
+    assert!(
+        sh_cmd.contains("\"${XDG_STATE_HOME"),
+        "write: XDG path must be double-quoted for shell expansion, got: {sh_cmd}"
+    );
+
+    // Regression guard: single-quoted XDG_STATE_HOME would suppress expansion entirely.
+    assert!(
+        !sh_cmd.contains("'${XDG_STATE_HOME"),
+        "write: XDG path must NOT be single-quoted (would suppress shell expansion), got: {sh_cmd}"
+    );
+
+    // The JSON payload must still be single-quoted (safe literal embedding).
+    assert!(
+        sh_cmd.contains("'") && sh_cmd.contains("printf '%s'"),
+        "write: JSON payload must remain single-quoted via printf '%s', got: {sh_cmd}"
+    );
+}
+
+// Regression: read and write must reference the same expanded path so state
+// written by one is found by the other (idempotency contract).
+#[test]
+fn test_build_state_read_write_path_consistency() {
+    use cbox::dbox::argv::build_state_read_argv;
+    use cbox::dbox::argv::build_state_write_argv;
+
+    let read_cmd = &build_state_read_argv("my-box")[6];
+    let write_cmd = &build_state_write_argv("my-box", "{}")[6];
+
+    // Both must reference the same XDG expression (double-quoted).
+    assert!(
+        read_cmd.contains("\"${XDG_STATE_HOME:-$HOME/.local/state}/cbox/provision.json\""),
+        "read: must double-quote XDG path, got: {read_cmd}"
+    );
+    assert!(
+        write_cmd.contains("\"${XDG_STATE_HOME:-$HOME/.local/state}/cbox/provision.json\""),
+        "write: must double-quote XDG path to match read, got: {write_cmd}"
+    );
+}
+
 #[test]
 fn test_build_state_read_argv_golden() {
     use cbox::dbox::argv::build_state_read_argv;
