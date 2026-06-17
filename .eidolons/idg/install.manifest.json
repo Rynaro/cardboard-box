@@ -1,0 +1,180 @@
+{
+  "eidolon": "idg",
+  "version": "1.8.1",
+  "methodology": "IDG",
+  "installed_at": "2026-06-16T23:10:33Z",
+  "target": "/home/rynaro/workspace/oss/cardboard-box/.eidolons/idg",
+  "hosts_wired": [
+    "claude-code"
+  ],
+  "canonical_inventory_strict": true,
+  "spec_file": ".eidolons/idg/SPEC.md",
+  "skills": [
+    {
+      "name": "composition",
+      "source_path": ".eidolons/idg/skills/composition.md",
+      "source_sha256": "cfee37159a9f3945f736caf08ab9a1c6a01800f39dd9df344c6b5fb6afee729b",
+      "vendor_path": ".claude/skills/idg-composition/SKILL.md",
+      "vendor_sha256": "cfee37159a9f3945f736caf08ab9a1c6a01800f39dd9df344c6b5fb6afee729b"
+    },
+    {
+      "name": "verification",
+      "source_path": ".eidolons/idg/skills/verification.md",
+      "source_sha256": "7be59e3da02c59a624a24896472f4f3faf1c6d08ff24ee0ef6ffa014443d05e6",
+      "vendor_path": ".claude/skills/idg-verification/SKILL.md",
+      "vendor_sha256": "7be59e3da02c59a624a24896472f4f3faf1c6d08ff24ee0ef6ffa014443d05e6"
+    },
+    {
+      "name": "section-parallel",
+      "source_path": ".eidolons/idg/skills/section-parallel.md",
+      "source_sha256": "8f386ac2aabc032cf8c72b385144f53c9b8a1e71724d1ee369ce2e6d0712094c",
+      "vendor_path": ".claude/skills/idg-section-parallel/SKILL.md",
+      "vendor_sha256": "8f386ac2aabc032cf8c72b385144f53c9b8a1e71724d1ee369ce2e6d0712094c"
+    },
+    {
+      "name": "verify-incoming",
+      "source_path": ".eidolons/idg/skills/verify-incoming.md",
+      "source_sha256": "651c4091de97235beaea55cf147a57d63e998b6c1eaaf71dbfb79871fff96470",
+      "vendor_path": ".claude/skills/idg-verify-incoming/SKILL.md",
+      "vendor_sha256": "651c4091de97235beaea55cf147a57d63e998b6c1eaaf71dbfb79871fff96470"
+    }
+  ],
+  "files_written": [
+    {
+      "path": "agent.md",
+      "sha256": "b14aaf5f87e55f2c2172c8a496db319ba269aef137a5366c8713876eaee8bac1",
+      "role": "agent-profile",
+      "mode": "created"
+    },
+    {
+      "path": "SPEC.md",
+      "sha256": "98a02ca70e6e530f8ce3f5721e4dbdf28fd1113b6d1222173b84f06d556f0091",
+      "role": "spec",
+      "mode": "created"
+    },
+    {
+      "path": "ECL_VERSION",
+      "sha256": "d526eb4e878a23ef26ae190031b4efd2d58ed66789ac049ea3dbaf74c9df7402",
+      "role": "ecl-version",
+      "mode": "created"
+    },
+    {
+      "path": "skills/composition.md",
+      "sha256": "cfee37159a9f3945f736caf08ab9a1c6a01800f39dd9df344c6b5fb6afee729b",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": "skills/verification.md",
+      "sha256": "7be59e3da02c59a624a24896472f4f3faf1c6d08ff24ee0ef6ffa014443d05e6",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": "skills/section-parallel.md",
+      "sha256": "8f386ac2aabc032cf8c72b385144f53c9b8a1e71724d1ee369ce2e6d0712094c",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": "skills/verify-incoming.md",
+      "sha256": "651c4091de97235beaea55cf147a57d63e998b6c1eaaf71dbfb79871fff96470",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": ".claude/skills/idg-composition/SKILL.md",
+      "sha256": "cfee37159a9f3945f736caf08ab9a1c6a01800f39dd9df344c6b5fb6afee729b",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": ".claude/skills/idg-verification/SKILL.md",
+      "sha256": "7be59e3da02c59a624a24896472f4f3faf1c6d08ff24ee0ef6ffa014443d05e6",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": ".claude/skills/idg-section-parallel/SKILL.md",
+      "sha256": "8f386ac2aabc032cf8c72b385144f53c9b8a1e71724d1ee369ce2e6d0712094c",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": ".claude/skills/idg-verify-incoming/SKILL.md",
+      "sha256": "651c4091de97235beaea55cf147a57d63e998b6c1eaaf71dbfb79871fff96470",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": "templates/session-chronicle.md",
+      "sha256": "11d912deb04b8748465603423798891663c815c2f0b7d0f5c571a98ebf042cbf",
+      "role": "template",
+      "mode": "created"
+    },
+    {
+      "path": "templates/adr.md",
+      "sha256": "df3cf1734132b55cb77c9de0703ecf42ee4cad6eccd927ae37e70ca8d451b505",
+      "role": "template",
+      "mode": "created"
+    },
+    {
+      "path": "templates/runbook.md",
+      "sha256": "a94c4f046b2487cd9a201476a32c87c8966a9c1764d4c9c62fbc7e0ef0f52df1",
+      "role": "template",
+      "mode": "created"
+    },
+    {
+      "path": "templates/change-narrative.md",
+      "sha256": "e1f94d274a70b456b6efe490db13da900da7c2d845ed53bbfd03a4e123c0c1d7",
+      "role": "template",
+      "mode": "created"
+    },
+    {
+      "path": "schemas/ecl-envelope.v1.json",
+      "sha256": "855314c0607e2c31327804f34f552aaf8411e1cef2d864422b293e2f6449496f",
+      "role": "other",
+      "mode": "created"
+    },
+    {
+      "path": "schemas/ecl-base-profile.v1.json",
+      "sha256": "f21a83c93c610aa88b352447cfeb00aecded03957c5a65c28b75242842e1aa2d",
+      "role": "other",
+      "mode": "created"
+    },
+    {
+      "path": "schemas/apivr-completion-report-profile.v1.json",
+      "sha256": "bd13b10246211b91d14d7d722ea884850c911d3911fc566efc0da09de0b0315c",
+      "role": "other",
+      "mode": "created"
+    },
+    {
+      "path": "schemas/root-cause-report-profile.v1.json",
+      "sha256": "f7f12c6c12ff78b1b4d583ff3a53859a345c5a2c8b12eaf291fca7a816d1a319",
+      "role": "other",
+      "mode": "created"
+    }
+  ],
+  "handoffs_declared": {
+    "upstream": [],
+    "downstream": []
+  },
+  "token_budget": {
+    "entry": 505,
+    "working_set_target": 1000
+  },
+  "security": {
+    "reads_repo": false,
+    "reads_network": false,
+    "writes_repo": false,
+    "persists": []
+  },
+  "comm": {
+    "envelope_version": "2.0",
+    "emits": [],
+    "verifies": [
+      "apivr-completion-report",
+      "root-cause-report"
+    ]
+  }
+}

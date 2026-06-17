@@ -1,0 +1,34 @@
+[package]
+name = "cbox"
+version = "0.1.0"
+edition = "2021"
+description = "A cozy distrobox manager"
+license = "MIT"
+
+[[bin]]
+name = "cbox"
+path = "src/main.rs"
+
+[lib]
+name = "cbox"
+path = "src/lib.rs"
+
+[features]
+default = []
+tui = ["dep:ratatui", "dep:crossterm"]
+testkit = []
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+serde_json = "1"
+ratatui = { version = "0.28", optional = true }
+crossterm = { version = "0.28", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+assert_cmd = "2"
+predicates = "3"

@@ -1,0 +1,7 @@
+# VIGIL failure signature ledger
+# Managed automatically by VIGIL Phase L
+# Soft cap: 50 entries — older single-occurrence entries archive to vigil-failures.archive.yaml
+
+version: "1.0"
+methodology: VIGIL
+signatures: []

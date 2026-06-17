@@ -1,0 +1,12 @@
+# Rust build artifacts. With the containerized workflow these live in the
+# `cbox_target` named volume and never appear here, but ignore them anyway in
+# case someone runs cargo natively.
+/target/
+
+# Local editor / OS cruft
+*.swp
+.DS_Store
+
+# Eidolons / agent scratch that should not be versioned
+.atlas/memex/*
+!.atlas/memex/.gitkeep

@@ -1,0 +1,187 @@
+{
+  "eidolon": "spectra",
+  "version": "4.9.1",
+  "methodology": "SPECTRA",
+  "installed_at": "2026-06-16T23:10:30Z",
+  "target": "./.eidolons/spectra",
+  "ecl_version_emitted": "2.0",
+  "spec_file": ".eidolons/spectra/SPEC.md",
+  "canonical_inventory_strict": true,
+  "skills": [
+    {
+      "name": "planning",
+      "source_path": ".eidolons/spectra/skills/planning.md",
+      "vendor_path": ".claude/skills/spectra-planning/SKILL.md",
+      "source_sha256": "f2d2d33e9c6da66d86ba784bbf407233768047adc0e786ee846f0d926eb63e0a",
+      "vendor_sha256": "f2d2d33e9c6da66d86ba784bbf407233768047adc0e786ee846f0d926eb63e0a"
+    },
+    {
+      "name": "discover",
+      "source_path": ".eidolons/spectra/skills/discover.md",
+      "vendor_path": ".claude/skills/spectra-discover/SKILL.md",
+      "source_sha256": "e47e20a29a2846c5582a0ad4542c0d3178d16bed8efa6e89c6c35b19f2e060ee",
+      "vendor_sha256": "e47e20a29a2846c5582a0ad4542c0d3178d16bed8efa6e89c6c35b19f2e060ee"
+    },
+    {
+      "name": "parallel-spec",
+      "source_path": ".eidolons/spectra/skills/parallel-spec.md",
+      "vendor_path": ".claude/skills/spectra-parallel-spec/SKILL.md",
+      "source_sha256": "4fca9e976be9cb3efdee56c810e8750c6c0b010a877d04d9156f662d1749b529",
+      "vendor_sha256": "4fca9e976be9cb3efdee56c810e8750c6c0b010a877d04d9156f662d1749b529"
+    },
+    {
+      "name": "verify-incoming",
+      "source_path": ".eidolons/spectra/skills/verify-incoming.md",
+      "vendor_path": ".claude/skills/spectra-verify-incoming/SKILL.md",
+      "source_sha256": "8a534d41b8a065fcbdfa95fa1f9ff5a5663076023037b0a874098cb340468142",
+      "vendor_sha256": "8a534d41b8a065fcbdfa95fa1f9ff5a5663076023037b0a874098cb340468142"
+    }
+  ],
+  "hosts_wired": [
+    "claude-code"
+  ],
+  "files_written": [
+    {
+      "path": "./.eidolons/spectra/agent.md",
+      "sha256": "81ef3738b79f60e3aab1a8293a485135a2ac913d497eb88300a7519161cecc0d",
+      "role": "agent-profile",
+      "mode": "created"
+    },
+    {
+      "path": "./.eidolons/spectra/SPEC.md",
+      "sha256": "5b13640824de703596c68ae3a34ef43f6c4b753d95e5171f453e4d4b5ee1d08f",
+      "role": "spec",
+      "mode": "created"
+    },
+    {
+      "path": "./.eidolons/spectra/templates/scoring.md",
+      "sha256": "86c35491d9d2b43521165ad5b634fa1409cd689f8bc11dba8652f68197034367",
+      "role": "template",
+      "mode": "created"
+    },
+    {
+      "path": "./.eidolons/spectra/templates/catalog.md",
+      "sha256": "5530a3c190585b322aa8785282391925aac83a084531bc02ea656d8a5f15f706",
+      "role": "template",
+      "mode": "created"
+    },
+    {
+      "path": "./.eidolons/spectra/templates/planning-artifact.md",
+      "sha256": "8f4136e676764e6bdd9b2d013947aa03812ef90ef3531f9f876fe523abd77ee2",
+      "role": "template",
+      "mode": "created"
+    },
+    {
+      "path": "./.eidolons/spectra/ECL_VERSION",
+      "sha256": "d526eb4e878a23ef26ae190031b4efd2d58ed66789ac049ea3dbaf74c9df7402",
+      "role": "ecl-version",
+      "mode": "created"
+    },
+    {
+      "path": "./.eidolons/spectra/schemas/spec-profile.v1.json",
+      "sha256": "0df28d948de1881db779d6220389fdefab7c0e659d4f3de7d1921c54019f0aed",
+      "role": "other",
+      "mode": "created"
+    },
+    {
+      "path": "./.eidolons/spectra/schemas/ecl-envelope.v1.json",
+      "sha256": "18dad214bd6661ac424fd30953ebe51d20d29067af8d8ef987a54abe636dc21a",
+      "role": "other",
+      "mode": "created"
+    },
+    {
+      "path": "./.eidolons/spectra/schemas/spec.envelope.json",
+      "sha256": "e4aac05c25e6b1ebaf5652ffc2523257103a437da31674b1e729c84619bd0652",
+      "role": "other",
+      "mode": "created"
+    },
+    {
+      "path": "./.eidolons/spectra/skills/discover.md",
+      "sha256": "e47e20a29a2846c5582a0ad4542c0d3178d16bed8efa6e89c6c35b19f2e060ee",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": ".claude/skills/spectra-discover/SKILL.md",
+      "sha256": "e47e20a29a2846c5582a0ad4542c0d3178d16bed8efa6e89c6c35b19f2e060ee",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": "./.eidolons/spectra/skills/parallel-spec.md",
+      "sha256": "4fca9e976be9cb3efdee56c810e8750c6c0b010a877d04d9156f662d1749b529",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": ".claude/skills/spectra-parallel-spec/SKILL.md",
+      "sha256": "4fca9e976be9cb3efdee56c810e8750c6c0b010a877d04d9156f662d1749b529",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": "./.eidolons/spectra/skills/planning.md",
+      "sha256": "f2d2d33e9c6da66d86ba784bbf407233768047adc0e786ee846f0d926eb63e0a",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": ".claude/skills/spectra-planning/SKILL.md",
+      "sha256": "f2d2d33e9c6da66d86ba784bbf407233768047adc0e786ee846f0d926eb63e0a",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": "./.eidolons/spectra/skills/verify-incoming.md",
+      "sha256": "8a534d41b8a065fcbdfa95fa1f9ff5a5663076023037b0a874098cb340468142",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": ".claude/skills/spectra-verify-incoming/SKILL.md",
+      "sha256": "8a534d41b8a065fcbdfa95fa1f9ff5a5663076023037b0a874098cb340468142",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "384596a69b685cea4b1eefbf016ffa65482a251208e53f97d67f1b1383ee78db",
+      "role": "dispatch",
+      "mode": "appended"
+    },
+    {
+      "path": "CLAUDE.md",
+      "sha256": "384596a69b685cea4b1eefbf016ffa65482a251208e53f97d67f1b1383ee78db",
+      "role": "dispatch",
+      "mode": "appended"
+    },
+    {
+      "path": ".claude/agents/spectra.md",
+      "sha256": "63a765dcc04d18f06dd177441bb3d30eadbddf9a51ac966a508211c103f0de47",
+      "role": "dispatch",
+      "mode": "created"
+    },
+    {
+      "path": "./.eidolons/spectra/install.manifest.json",
+      "sha256": "",
+      "role": "manifest",
+      "mode": "created"
+    }
+  ],
+  "handoffs_declared": {
+    "upstream": [],
+    "downstream": []
+  },
+  "token_budget": {
+    "entry": 641,
+    "working_set_target": 1000
+  },
+  "security": {
+    "reads_repo": true,
+    "reads_network": false,
+    "writes_repo": true,
+    "persists": [
+      "./.eidolons/spectra/"
+    ]
+  }
+}

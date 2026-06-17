@@ -1,0 +1,153 @@
+{
+  "eidolon": "kupo",
+  "version": "1.1.1",
+  "methodology": "KUPO",
+  "installed_at": "2026-06-16T23:10:36Z",
+  "target": "/home/rynaro/workspace/oss/cardboard-box/.eidolons/kupo",
+  "hosts_wired": [
+    "claude-code"
+  ],
+  "canonical_inventory_strict": true,
+  "spec_file": ".eidolons/kupo/SPEC.md",
+  "skills": [
+    {
+      "name": "verify-incoming",
+      "source_path": ".eidolons/kupo/skills/verify-incoming.md",
+      "source_sha256": "69d5e85490d5c638321a23ab277e02363f68f9ab2281dd75b49950d1a4e38fab",
+      "vendor_path": ".claude/skills/kupo-verify-incoming/SKILL.md",
+      "vendor_sha256": "69d5e85490d5c638321a23ab277e02363f68f9ab2281dd75b49950d1a4e38fab"
+    },
+    {
+      "name": "keep-or-kick",
+      "source_path": ".eidolons/kupo/skills/keep-or-kick.md",
+      "source_sha256": "8a75bfdd6ae423b50d313d6f358059d1b7778e94ac7e0367faf58308ee97cc84",
+      "vendor_path": ".claude/skills/kupo-keep-or-kick/SKILL.md",
+      "vendor_sha256": "8a75bfdd6ae423b50d313d6f358059d1b7778e94ac7e0367faf58308ee97cc84"
+    },
+    {
+      "name": "patch-verify",
+      "source_path": ".eidolons/kupo/skills/patch-verify.md",
+      "source_sha256": "da3fdf389cf239660cfa4f023715de493224953c345ef54518227963a5eac32f",
+      "vendor_path": ".claude/skills/kupo-patch-verify/SKILL.md",
+      "vendor_sha256": "da3fdf389cf239660cfa4f023715de493224953c345ef54518227963a5eac32f"
+    }
+  ],
+  "files_written": [
+    {
+      "path": "agent.md",
+      "sha256": "72f914dd382341455d2ae82c08e79430e975d67e433623dbf2aba4622b2057fe",
+      "role": "agent-profile",
+      "mode": "created"
+    },
+    {
+      "path": "SPEC.md",
+      "sha256": "7d18507f298040a86acd453d5444cbe5e426fb89b09be22233649b6a59490ff8",
+      "role": "spec",
+      "mode": "created"
+    },
+    {
+      "path": "ECL_VERSION",
+      "sha256": "d526eb4e878a23ef26ae190031b4efd2d58ed66789ac049ea3dbaf74c9df7402",
+      "role": "ecl-version",
+      "mode": "created"
+    },
+    {
+      "path": "skills/verify-incoming.md",
+      "sha256": "69d5e85490d5c638321a23ab277e02363f68f9ab2281dd75b49950d1a4e38fab",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": "skills/keep-or-kick.md",
+      "sha256": "8a75bfdd6ae423b50d313d6f358059d1b7778e94ac7e0367faf58308ee97cc84",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": "skills/patch-verify.md",
+      "sha256": "da3fdf389cf239660cfa4f023715de493224953c345ef54518227963a5eac32f",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": ".claude/skills/kupo-verify-incoming/SKILL.md",
+      "sha256": "69d5e85490d5c638321a23ab277e02363f68f9ab2281dd75b49950d1a4e38fab",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": ".claude/skills/kupo-keep-or-kick/SKILL.md",
+      "sha256": "8a75bfdd6ae423b50d313d6f358059d1b7778e94ac7e0367faf58308ee97cc84",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": ".claude/skills/kupo-patch-verify/SKILL.md",
+      "sha256": "da3fdf389cf239660cfa4f023715de493224953c345ef54518227963a5eac32f",
+      "role": "skill",
+      "mode": "created"
+    },
+    {
+      "path": "schemas/ecl-envelope.v1.json",
+      "sha256": "855314c0607e2c31327804f34f552aaf8411e1cef2d864422b293e2f6449496f",
+      "role": "other",
+      "mode": "created"
+    },
+    {
+      "path": "schemas/ecl-base-profile.v1.json",
+      "sha256": "f21a83c93c610aa88b352447cfeb00aecded03957c5a65c28b75242842e1aa2d",
+      "role": "other",
+      "mode": "created"
+    },
+    {
+      "path": "schemas/install.manifest.v1.json",
+      "sha256": "ff6a1672579275a07f7ffb5a0523cc6ad2babf6846c6a30f8c6f9f6aad03889b",
+      "role": "other",
+      "mode": "created"
+    },
+    {
+      "path": "schemas/kupo-edit-proposal.v1.json",
+      "sha256": "540dfe3956bd52548456797d12af41679a86f8b5b56d9af1049e665227b48b29",
+      "role": "other",
+      "mode": "created"
+    }
+  ],
+  "handoffs_declared": {
+    "upstream": [
+      "spectra",
+      "vigil",
+      "forge",
+      "apivr",
+      "atlas"
+    ],
+    "downstream": []
+  },
+  "token_budget": {
+    "entry": 809,
+    "working_set_target": 1000
+  },
+  "security": {
+    "reads_repo": true,
+    "reads_network": false,
+    "writes_repo": false,
+    "persists": []
+  },
+  "comm": {
+    "envelope_version": "2.0",
+    "emits": [
+      "PROPOSE",
+      "INFORM",
+      "ESCALATE",
+      "REFUSE",
+      "ACKNOWLEDGE",
+      "RESUME"
+    ],
+    "verifies": [
+      "spec",
+      "root-cause-report",
+      "decision-record",
+      "change-summary",
+      "scout-report"
+    ]
+  }
+}
