@@ -1,0 +1,54 @@
+name: CI
+
+# Mirrors the local `make check` gate (fmt-check + clippy[all-features] +
+# clippy[no-default-features] + build + test). Runs inside the same Rust image
+# base the dev container uses (rust:1-slim-bookworm). That image has NO
+# distrobox / podman / docker installed, so a green run is a live proof of the
+# G-NO-NET gate: the whole suite passes with no container backend present — the
+# MockRunner seam carries every test.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: fmt · clippy · build · test
+    runs-on: ubuntu-latest
+    container: rust:1-slim-bookworm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install clippy + rustfmt
+        run: rustup component add clippy rustfmt
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt --check
+
+      - name: Clippy (all features — tui on)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Clippy (no default features — tui off)
+        run: cargo clippy --all-targets --no-default-features -- -D warnings
+
+      - name: Build (debug + release single binary)
+        run: |
+          cargo build
+          cargo build --release
+
+      - name: Test (no real distrobox — proves G-NO-NET)
+        run: cargo test
