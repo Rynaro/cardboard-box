@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/Rynaro/cardboard-box/compare/v0.3.1...v0.4.0) (2026-06-17)
+
+
+### Features
+
+* surface provision step failures Vagrant-style ([#9](https://github.com/Rynaro/cardboard-box/issues/9)) ([a859ae4](https://github.com/Rynaro/cardboard-box/commit/a859ae416712fe7586bf3631f96a8d421e0d974d))
+
 ## [0.3.1](https://github.com/Rynaro/cardboard-box/compare/v0.3.0...v0.3.1) (2026-06-17)
 
 
