@@ -1,3 +1,4 @@
+pub mod distro_family;
 pub mod docker_mode;
 pub mod model;
 pub mod validate;
