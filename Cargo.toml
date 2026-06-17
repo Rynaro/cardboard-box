@@ -14,7 +14,7 @@ name = "cbox"
 path = "src/lib.rs"
 
 [features]
-default = []
+default = ["tui"]
 tui = ["dep:ratatui", "dep:crossterm"]
 testkit = []
 

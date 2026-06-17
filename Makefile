@@ -58,14 +58,19 @@ test:
 lint:
 	$(RUN) cargo clippy --all-targets --all-features -- -D warnings
 
+## Lint the lean (TUI-off) build too, so the feature matrix can't regress.
+lint-lean:
+	$(RUN) cargo clippy --all-targets --no-default-features -- -D warnings
+
 fmt:
 	$(RUN) cargo fmt
 
 fmt-check:
 	$(RUN) cargo fmt --check
 
-## Everything CI would gate on (G-BUILD/G-UNIT/G-MOCK/G-NO-NET): fmt + clippy + build + tests.
-check: fmt-check lint build test
+## Everything CI would gate on (G-BUILD/G-UNIT/G-MOCK/G-NO-NET): fmt + clippy
+## (both feature configs) + build + tests.
+check: fmt-check lint lint-lean build test
 
 ## Interactive shell in the toolchain container (for poking around).
 shell:

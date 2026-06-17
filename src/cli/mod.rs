@@ -9,6 +9,7 @@ pub mod inspect;
 pub mod list;
 pub mod output;
 pub mod rm;
+pub mod tui_cmd;
 pub mod up;
 
 /// cbox — a cozy distrobox manager
@@ -49,7 +50,7 @@ pub struct Cli {
     pub backend: Option<String>,
 
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -83,4 +84,7 @@ pub enum Commands {
 
     /// Create-if-absent then apply (the "just works" entry point).
     Up(up::UpArgs),
+
+    /// Launch the cozy terminal cockpit.
+    Tui(tui_cmd::TuiArgs),
 }
