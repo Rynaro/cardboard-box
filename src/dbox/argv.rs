@@ -1,6 +1,7 @@
 //! Pure argv builders — no I/O, no runner. Tested independently (AC-ARGV-1).
 //! Every distrobox/backend command is built here. Flag mapping lives in one place.
 
+use crate::boxfile::distro_family::detect_family;
 use crate::boxfile::docker_mode::docker_mode_flags;
 use crate::core::spec::{CreateSpec, DockerMode, EnterSpec, RmSpec};
 
@@ -18,7 +19,8 @@ pub fn build_create_argv(spec: &CreateSpec) -> Vec<String> {
 
     // Packages from the base spec + any docker-mode injected packages
     let mut all_packages = spec.packages.clone();
-    let mode_flags = docker_mode_flags(&spec.docker_mode, &spec.backend, spec.uid);
+    let family = detect_family(&spec.image);
+    let mode_flags = docker_mode_flags(&spec.docker_mode, &spec.backend, spec.uid, &family);
     all_packages.extend(mode_flags.extra_packages.iter().cloned());
 
     if !all_packages.is_empty() {
