@@ -36,7 +36,11 @@ pub struct TuiConfig {
 #[cfg(feature = "tui")]
 pub fn run(cfg: TuiConfig, runner: Arc<dyn DistroboxRunner>) -> Result<(), CboxError> {
     use crate::dbox::backend::Backend;
-    let backend = Backend::detect_or_default(cfg.backend_override.as_deref())?;
+    // Probe for a usable backend (podman → docker), same as the CLI. Using the
+    // real `detect` instead of the test-only `detect_or_default` means a
+    // docker-only host resolves to docker instead of silently defaulting to
+    // podman and listing nothing.
+    let backend = Backend::detect(cfg.backend_override.as_deref())?;
     app::run(runner, backend)
 }
 

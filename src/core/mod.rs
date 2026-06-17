@@ -120,20 +120,23 @@ pub fn list_human(runner: &dyn DistroboxRunner) -> Result<ListOutcome, CboxError
 }
 
 /// Parse `podman/docker ps -a --filter label=manager=distrobox --format json`.
-/// Both podman and docker return a JSON array; field names differ slightly.
+/// podman returns a JSON array with object `Labels`; docker returns NDJSON
+/// (one object per line) with `Labels` as a comma-separated string. Field
+/// names differ slightly between the two.
 fn parse_backend_ps_json(json: &str, _backend: &Backend) -> Result<Vec<BoxRow>, CboxError> {
     let json = json.trim();
     if json.is_empty() || json == "null" || json == "[]" {
         return Ok(Vec::new());
     }
 
-    let value: serde_json::Value = serde_json::from_str(json)
-        .map_err(|e| CboxError::ioerr(format!("Failed to parse backend JSON: {e}")))?;
-
-    let arr = match value {
-        serde_json::Value::Array(a) => a,
-        serde_json::Value::Object(_) => vec![value],
-        _ => vec![],
+    // podman emits a single JSON array (or object); docker emits newline-delimited
+    // JSON objects (NDJSON), one container per line. Try the array/object form
+    // first, then fall back to parsing NDJSON line by line.
+    let arr = match serde_json::from_str::<serde_json::Value>(json) {
+        Ok(serde_json::Value::Array(a)) => a,
+        Ok(obj @ serde_json::Value::Object(_)) => vec![obj],
+        Ok(_) => vec![],
+        Err(_) => parse_ndjson(json)?,
     };
 
     let mut boxes = Vec::new();
@@ -146,16 +149,10 @@ fn parse_backend_ps_json(json: &str, _backend: &Backend) -> Result<Vec<BoxRow>, 
         let image = extract_str(&item, &["Image", "image"]).unwrap_or_default();
         let id = extract_str(&item, &["Id", "ID", "id"]).unwrap_or_default();
 
-        // Labels
-        let labels = item.get("Labels").or_else(|| item.get("labels"));
-        let docker_mode = labels
-            .and_then(|l| l.get("cbox.docker_mode"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-            .to_string();
-        let cbox_managed = labels
-            .and_then(|l| l.get("cbox.managed"))
-            .and_then(|v| v.as_str())
+        // Labels — podman returns an object; docker returns a "k=v,k=v" string.
+        let docker_mode =
+            label_value(&item, "cbox.docker_mode").unwrap_or_else(|| "unknown".into());
+        let cbox_managed = label_value(&item, "cbox.managed")
             .map(|v| v == "true")
             .unwrap_or(false);
 
@@ -183,6 +180,41 @@ fn extract_str(val: &serde_json::Value, keys: &[&str]) -> Option<String> {
             }
             if let Some(s) = v.as_str() {
                 return Some(s.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Parse docker's NDJSON `ps` output — one JSON object per line.
+fn parse_ndjson(json: &str) -> Result<Vec<serde_json::Value>, CboxError> {
+    let mut items = Vec::new();
+    for line in json.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let v: serde_json::Value = serde_json::from_str(line)
+            .map_err(|e| CboxError::ioerr(format!("Failed to parse backend JSON: {e}")))?;
+        items.push(v);
+    }
+    Ok(items)
+}
+
+/// Look up a single container label, tolerating both backend shapes:
+/// podman returns `Labels` as a JSON object; docker returns it as a
+/// comma-separated `key=value` string.
+fn label_value(item: &serde_json::Value, key: &str) -> Option<String> {
+    let labels = item.get("Labels").or_else(|| item.get("labels"))?;
+    if let Some(obj) = labels.as_object() {
+        return obj.get(key).and_then(|v| v.as_str()).map(|s| s.to_string());
+    }
+    if let Some(s) = labels.as_str() {
+        for pair in s.split(',') {
+            if let Some((k, v)) = pair.split_once('=') {
+                if k.trim() == key {
+                    return Some(v.trim().to_string());
+                }
             }
         }
     }

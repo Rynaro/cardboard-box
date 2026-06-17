@@ -55,6 +55,36 @@ fn ac_list_1_json_two_boxes() {
     assert_eq!(second.docker_mode, "none");
 }
 
+// Regression: docker `ps --format json` emits NDJSON (one object per line) with
+// `Labels` as a comma-separated string, not a JSON array with object labels.
+// Two+ docker boxes used to fail with "trailing characters", leaving the list
+// (and the TUI) empty. See parse_backend_ps_json NDJSON fallback.
+#[test]
+fn docker_ndjson_two_boxes() {
+    let ndjson = concat!(
+        r#"{"ID":"82d7901a72b2","Names":"electionbuddy","State":"running","Image":"docker.io/library/ubuntu:26.04","Labels":"cbox.docker_mode=host,cbox.managed=true,manager=distrobox"}"#,
+        "\n",
+        r#"{"ID":"f249ddca1124","Names":"rust-box","State":"exited","Image":"alpine","Labels":"cbox.managed=true,manager=distrobox"}"#,
+    );
+    let runner = MockRunner::new().with_default(MockResponse::ok(ndjson));
+    let backend = Backend::Docker;
+
+    let outcome = core::list_machine(&backend, &runner).expect("docker NDJSON should parse");
+    assert_eq!(outcome.boxes.len(), 2);
+
+    let first = &outcome.boxes[0];
+    assert_eq!(first.name, "electionbuddy");
+    assert_eq!(first.status, "running");
+    assert_eq!(first.docker_mode, "host");
+    assert!(first.cbox_managed);
+
+    let second = &outcome.boxes[1];
+    assert_eq!(second.name, "rust-box");
+    // no cbox.docker_mode label on this one → "unknown", and still managed.
+    assert_eq!(second.docker_mode, "unknown");
+    assert!(second.cbox_managed);
+}
+
 // AC-LIST-2: human path — table header includes NAME STATUS IMAGE DOCKER CBOX?.
 // (We test the data is correct; rendering is in output.rs.)
 #[test]
