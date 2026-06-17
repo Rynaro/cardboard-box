@@ -53,5 +53,9 @@ fn dispatch(cli: &Cli, ctx: &OutputCtx, runner: &RealRunner) -> Result<(), CboxE
         Commands::Inspect(args) => cli::inspect::run(args, backend_str, ctx, runner),
         Commands::Edit(args) => cli::edit::run(args, cli.json, backend_str, ctx, runner),
         Commands::Doctor(args) => cli::doctor::run(args, backend_str, ctx, runner),
+        Commands::Apply(args) => {
+            cli::apply::run(args, cli.dry_run, backend_str, cli.yes, ctx, runner)
+        }
+        Commands::Up(args) => cli::up::run(args, cli.dry_run, backend_str, cli.yes, ctx, runner),
     }
 }

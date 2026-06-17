@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 
+pub mod apply;
 pub mod create;
 pub mod doctor;
 pub mod edit;
@@ -8,6 +9,7 @@ pub mod inspect;
 pub mod list;
 pub mod output;
 pub mod rm;
+pub mod up;
 
 /// cbox — a cozy distrobox manager
 #[derive(Parser, Debug)]
@@ -75,4 +77,10 @@ pub enum Commands {
 
     /// Check your environment (distrobox + backend).
     Doctor(doctor::DoctorArgs),
+
+    /// Converge an existing box to its Boxfile.
+    Apply(apply::ApplyArgs),
+
+    /// Create-if-absent then apply (the "just works" entry point).
+    Up(up::UpArgs),
 }

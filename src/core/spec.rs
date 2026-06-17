@@ -192,6 +192,101 @@ pub struct BackendStatus {
     pub version: Option<String>,
 }
 
+// ─── Phase 2 spec types ──────────────────────────────────────────────────────
+
+/// Spec for `cbox apply`.
+#[derive(Debug, Clone)]
+pub struct ApplySpec {
+    pub name: String,
+    pub boxfile_path: String,
+    pub force: bool,
+    pub redo: Vec<usize>,
+    pub no_provision: bool,
+    pub recreate: bool,
+    #[allow(dead_code)]
+    pub yes: bool,
+    pub dry_run: bool,
+    pub backend: Backend,
+}
+
+/// Spec for `cbox up`.
+#[derive(Debug, Clone)]
+pub struct UpSpec {
+    pub create_spec: CreateSpec,
+    pub apply_force: bool,
+    pub apply_redo: Vec<usize>,
+    pub no_provision: bool,
+    pub recreate: bool,
+    pub yes: bool,
+    pub dry_run: bool,
+}
+
+/// Outcome of `cbox apply`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ApplyOutcome {
+    pub ok: bool,
+    pub action: String,
+    pub name: String,
+    pub diff: DiffResult,
+    pub recreate_required: bool,
+    pub steps: Vec<ProvisionStepResult>,
+    pub summary: ApplySummary,
+}
+
+/// Outcome of `cbox up`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UpOutcome {
+    pub ok: bool,
+    pub action: String,
+    pub created: bool,
+    pub name: String,
+    pub apply: ApplyOutcome,
+}
+
+/// Summary counts for apply output.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ApplySummary {
+    pub ran: usize,
+    pub skipped: usize,
+    pub copied: usize,
+    pub failed: usize,
+}
+
+/// The result of a single provision step.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProvisionStepResult {
+    pub idx: usize,
+    #[serde(rename = "type")]
+    pub step_type: String,
+    pub status: String, // "ran" | "skipped" | "copied" | "failed"
+    pub hash: String,
+    pub duration_ms: u64,
+    pub exit_code: Option<i32>,
+}
+
+/// Diff result between Boxfile and live.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DiffResult {
+    pub class: String, // "Incremental" | "Recreate"
+    pub fields: Vec<DiffField>,
+}
+
+/// A single changed field in the diff.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DiffField {
+    pub field: String,
+    pub old: String,
+    pub new: String,
+    pub class: String, // "Incremental" | "Recreate"
+}
+
+/// Package additions identified by the diff.
+#[derive(Debug, Clone)]
+pub struct PackageDiff {
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+}
+
 fn get_uid() -> u32 {
     #[cfg(unix)]
     unsafe {

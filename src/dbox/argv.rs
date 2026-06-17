@@ -86,16 +86,17 @@ pub fn build_create_argv(spec: &CreateSpec) -> Vec<String> {
         }
     }
 
-    // cbox labels (§5.5)
+    // cbox labels (§5.5 + §4.4 cbox.image added in P2)
     let docker_label = match &spec.docker_mode {
         DockerMode::None => "none",
         DockerMode::Host => "host",
         DockerMode::Nested => "nested",
     };
     args.push("--additional-flags".into());
-    args.push(format!("--label cbox.managed=true --label cbox.docker_mode={docker_label} --label cbox.boxfile_path={} --label cbox.version={}",
+    args.push(format!("--label cbox.managed=true --label cbox.docker_mode={docker_label} --label cbox.boxfile_path={} --label cbox.version={} --label cbox.image={}",
         spec.boxfile_path.as_deref().unwrap_or(""),
         env!("CARGO_PKG_VERSION"),
+        spec.image,
     ));
 
     args
@@ -161,4 +162,86 @@ pub fn build_inspect_argv(name: &str) -> Vec<String> {
 #[allow(dead_code)]
 pub fn build_dbox_list_argv() -> Vec<String> {
     vec!["list".to_string()]
+}
+
+// ─── P2 argv builders ────────────────────────────────────────────────────────
+
+/// Build the argv for a provision shell step:
+/// `distrobox enter --name <NAME> -- sh -c "<run>"`
+/// The `run` string is passed as a single `sh -c` argument; the guest shell parses it.
+pub fn build_provision_shell_argv(name: &str, run: &str) -> Vec<String> {
+    vec![
+        "enter".to_string(),
+        "--name".to_string(),
+        name.to_string(),
+        "--".to_string(),
+        "sh".to_string(),
+        "-c".to_string(),
+        run.to_string(),
+    ]
+}
+
+/// Build the argv for `<backend> cp <host_src> <name>:<guest_dst>`.
+/// program is the backend binary (podman/docker); these args are passed to `runner.run`.
+pub fn build_copy_argv(name: &str, src: &str, dst: &str) -> Vec<String> {
+    vec!["cp".to_string(), src.to_string(), format!("{name}:{dst}")]
+}
+
+/// Build the argv to read the guest provision state file.
+/// `distrobox enter --name <NAME> -- sh -c 'cat "$STATE" 2>/dev/null || echo ""'`
+pub fn build_state_read_argv(name: &str) -> Vec<String> {
+    // Use a fixed state path constant; the guest resolves $HOME.
+    // We use an explicit path rather than env var expansion for predictability in tests.
+    let cmd = "cat \"${XDG_STATE_HOME:-$HOME/.local/state}/cbox/provision.json\" 2>/dev/null || echo \"\"";
+    vec![
+        "enter".to_string(),
+        "--name".to_string(),
+        name.to_string(),
+        "--".to_string(),
+        "sh".to_string(),
+        "-c".to_string(),
+        cmd.to_string(),
+    ]
+}
+
+/// Build the argv to write the guest provision state file.
+/// The JSON is single-quote escaped and embedded in a `printf '%s'` shell command.
+/// `distrobox enter --name <NAME> -- sh -c 'mkdir -p "$DIR"; printf %s '<json>' > "$STATE"'`
+///
+/// Single-quote escaping: replace `'` with `'\''` so the JSON is safe inside `sh -c '...'`.
+pub fn build_state_write_argv(name: &str, json: &str) -> Vec<String> {
+    let escaped = escape_single_quotes(json);
+    let state_path = "${XDG_STATE_HOME:-$HOME/.local/state}/cbox/provision.json";
+    let state_dir = "${XDG_STATE_HOME:-$HOME/.local/state}/cbox";
+    let cmd = format!("mkdir -p '{state_dir}' && printf '%s' '{escaped}' > '{state_path}'");
+    vec![
+        "enter".to_string(),
+        "--name".to_string(),
+        name.to_string(),
+        "--".to_string(),
+        "sh".to_string(),
+        "-c".to_string(),
+        cmd,
+    ]
+}
+
+/// Single-quote escape: replace every `'` with `'\''`.
+/// This makes arbitrary text safe to embed inside `sh -c '...'`.
+pub fn escape_single_quotes(s: &str) -> String {
+    s.replace('\'', "'\\''")
+}
+
+/// Build the argv to probe the distro package manager inside the box.
+/// Returns the path of the first found package manager.
+pub fn build_pkg_probe_argv(name: &str) -> Vec<String> {
+    let cmd = "command -v dnf || command -v apt-get || command -v apk || echo unknown";
+    vec![
+        "enter".to_string(),
+        "--name".to_string(),
+        name.to_string(),
+        "--".to_string(),
+        "sh".to_string(),
+        "-c".to_string(),
+        cmd.to_string(),
+    ]
 }

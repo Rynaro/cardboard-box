@@ -1,21 +1,27 @@
 //! Front-end-agnostic command logic. CLI and TUI both call these functions.
 //! All spawns go through `&dyn DistroboxRunner`.
 
+pub mod diff;
+pub mod provision;
 pub mod spec;
+pub mod state_store;
 
+use crate::boxfile;
 use crate::dbox::{
     argv::{
         build_create_argv, build_dbox_list_argv, build_enter_argv, build_inspect_argv,
-        build_list_argv, build_rm_argv,
+        build_list_argv, build_pkg_probe_argv, build_provision_shell_argv, build_rm_argv,
     },
     backend::Backend,
     runner::{DistroboxRunner, Invocation, RunMode},
 };
 use crate::error::CboxError;
 use spec::{
-    BackendInfo, BackendStatus, BoxRow, CreateSpec, DistroboxInfo, DoctorResult, DoctorSpec,
-    EditSpec, EnterSpec, InspectResult, InspectSpec, MountResult, RmSpec,
+    ApplyOutcome, ApplySpec, ApplySummary, BackendInfo, BackendStatus, BoxRow, CreateSpec,
+    DiffResult, DistroboxInfo, DoctorResult, DoctorSpec, EditSpec, EnterSpec, InspectResult,
+    InspectSpec, MountResult, ProvisionStepResult, RmSpec, UpOutcome, UpSpec,
 };
+use state_store::{ProvisionState, ProvisionStateStore};
 
 // ─── create ──────────────────────────────────────────────────────────────────
 
@@ -625,4 +631,436 @@ pub fn scaffold_boxfile(name: &str, spec: &EditSpec, runner: &dyn DistroboxRunne
          docker = \"{docker_mode}\"\n\
          packages = []\n{mounts_str}\n"
     )
+}
+
+// ─── apply ────────────────────────────────────────────────────────────────────
+
+/// Apply a Boxfile to an existing box: diff, run incremental provision steps.
+/// Recreate-class diffs without `--recreate` → exit 65.
+pub fn apply(
+    spec: &ApplySpec,
+    store: &dyn ProvisionStateStore,
+    runner: &dyn DistroboxRunner,
+) -> Result<ApplyOutcome, CboxError> {
+    // 1. Parse Boxfile
+    let (bf, _warnings) = boxfile::parse_file(&spec.boxfile_path)?;
+
+    // 2. Inspect live box
+    let inspect_spec = InspectSpec {
+        name: spec.name.clone(),
+        raw: false,
+        backend: spec.backend.clone(),
+    };
+    let live = match inspect(&inspect_spec, runner) {
+        Ok(r) => r,
+        Err(e) if e.exit_code() == crate::error::exit::UNAVAILABLE => {
+            return Err(CboxError::box_not_found(&spec.name));
+        }
+        Err(e) => return Err(e),
+    };
+
+    // 3. Diff
+    let diff_result = diff::diff_boxfile_vs_live(&bf, &live);
+    let recreate_required = diff_result.class == "Recreate";
+
+    if recreate_required && !spec.recreate {
+        // Build a cozy message naming the forcing fields
+        let forcing: Vec<String> = diff_result
+            .fields
+            .iter()
+            .filter(|f| f.class == "Recreate")
+            .map(|f| format!("  {}: {}  ->  {}", f.field, f.old, f.new))
+            .collect();
+        let msg = format!(
+            "\"{}\" needs a recreate to apply these changes:\n{}\n\
+             A recreate destroys the container ($HOME is preserved; box-local /usr changes are lost).\n\
+             Re-run with:  cbox apply {} --recreate",
+            spec.name,
+            forcing.join("\n"),
+            spec.name
+        );
+        return Err(CboxError::dataerr(msg));
+    }
+
+    // 4. Handle recreate flow
+    if recreate_required && spec.recreate {
+        // Destroy + recreate
+        let rm_spec = RmSpec {
+            names: vec![spec.name.clone()],
+            force: true,
+            rm_home: false,
+            all: false,
+            yes: true,
+        };
+        rm(&rm_spec, runner)?;
+
+        // Build a CreateSpec from the Boxfile
+        let create_spec = create_spec_from_boxfile_and_apply_spec(&bf, spec);
+        create(&create_spec, runner)?;
+
+        // Fresh box: all steps run (no state yet)
+        let fresh_state = ProvisionState::new();
+        return run_provision_and_build_outcome(
+            spec,
+            &bf,
+            fresh_state,
+            diff_result,
+            true,
+            store,
+            runner,
+        );
+    }
+
+    // 5. Incremental: handle package additions
+    let pkg_diff = diff::package_diff(&bf, &live);
+    if !pkg_diff.added.is_empty() && !spec.no_provision {
+        install_packages_incremental(&spec.name, &pkg_diff.added, runner)?;
+    }
+
+    // 6. Read provision state
+    if spec.no_provision {
+        // Skip provision steps entirely
+        return Ok(ApplyOutcome {
+            ok: true,
+            action: "apply".to_string(),
+            name: spec.name.clone(),
+            diff: diff_result,
+            recreate_required: false,
+            steps: Vec::new(),
+            summary: ApplySummary {
+                ran: 0,
+                skipped: 0,
+                copied: 0,
+                failed: 0,
+            },
+        });
+    }
+
+    let state = if spec.force {
+        // --force: treat as empty state → all steps run
+        ProvisionState::new()
+    } else {
+        read_state_with_force(&spec.name, spec.force, store, runner)?
+    };
+
+    run_provision_and_build_outcome(spec, &bf, state, diff_result, false, store, runner)
+}
+
+fn run_provision_and_build_outcome(
+    spec: &ApplySpec,
+    bf: &crate::boxfile::model::Boxfile,
+    mut state: ProvisionState,
+    diff_result: DiffResult,
+    _fresh: bool,
+    store: &dyn ProvisionStateStore,
+    runner: &dyn DistroboxRunner,
+) -> Result<ApplyOutcome, CboxError> {
+    let boxfile_dir = std::path::Path::new(&spec.boxfile_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+
+    let plan = provision::ProvisionPlan {
+        name: &spec.name,
+        steps: &bf.provision,
+        boxfile_dir,
+        backend: &spec.backend,
+        force: spec.force,
+        redo: &spec.redo,
+        dry_run: spec.dry_run,
+    };
+
+    let step_results = match provision::provision(&plan, store, runner, &mut state) {
+        Ok(r) => r,
+        Err(e) => {
+            // Partial failure: the error is from a failed step
+            // We already have partial step_results in state; return the error
+            return Err(e);
+        }
+    };
+
+    let summary = summarize(&step_results);
+    Ok(ApplyOutcome {
+        ok: true,
+        action: "apply".to_string(),
+        name: spec.name.clone(),
+        diff: diff_result,
+        recreate_required: false,
+        steps: step_results,
+        summary,
+    })
+}
+
+fn read_state_with_force(
+    name: &str,
+    force: bool,
+    store: &dyn ProvisionStateStore,
+    runner: &dyn DistroboxRunner,
+) -> Result<ProvisionState, CboxError> {
+    match store.read(name, runner) {
+        Ok(s) => Ok(s),
+        Err(e) if e.exit_code() == crate::error::exit::IOERR => {
+            if force {
+                Ok(ProvisionState::new())
+            } else {
+                Err(e)
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn summarize(steps: &[ProvisionStepResult]) -> ApplySummary {
+    let mut ran = 0;
+    let mut skipped = 0;
+    let mut copied = 0;
+    let mut failed = 0;
+    for s in steps {
+        match s.status.as_str() {
+            "ran" => ran += 1,
+            "skipped" => skipped += 1,
+            "copied" => copied += 1,
+            "failed" => failed += 1,
+            _ => {}
+        }
+    }
+    ApplySummary {
+        ran,
+        skipped,
+        copied,
+        failed,
+    }
+}
+
+/// Install additional packages into a running box (incremental package diff).
+fn install_packages_incremental(
+    name: &str,
+    packages: &[String],
+    runner: &dyn DistroboxRunner,
+) -> Result<(), CboxError> {
+    // Probe the package manager
+    let probe_args = build_pkg_probe_argv(name);
+    let probe_inv = Invocation::new("distrobox", probe_args, RunMode::Capture);
+    let probe_out = runner.run(probe_inv)?;
+
+    let pkg_manager = probe_out.stdout.trim().to_string();
+    let install_cmd = match pkg_manager.as_str() {
+        s if s.ends_with("dnf") => "sudo dnf install -y",
+        s if s.ends_with("apt-get") => "sudo apt-get install -y",
+        s if s.ends_with("apk") => "sudo apk add",
+        _ => "sudo dnf install -y", // fallback
+    };
+
+    let pkgs_str = packages.join(" ");
+    let run_cmd = format!("{install_cmd} {pkgs_str}");
+    let args = build_provision_shell_argv(name, &run_cmd);
+    let inv = Invocation::new("distrobox", args, RunMode::Capture);
+    let out = runner.run(inv)?;
+
+    if out.status != 0 {
+        return Err(CboxError::backend_error(out.status, &out.stderr, &out.argv));
+    }
+
+    Ok(())
+}
+
+fn create_spec_from_boxfile_and_apply_spec(
+    bf: &crate::boxfile::model::Boxfile,
+    spec: &ApplySpec,
+) -> CreateSpec {
+    use crate::boxfile::model::DockerModeField;
+    use spec::DockerMode;
+
+    let docker_mode = match bf.docker {
+        DockerModeField::None => DockerMode::None,
+        DockerModeField::Host => DockerMode::Host,
+        DockerModeField::Nested => DockerMode::Nested,
+    };
+
+    let mounts: Vec<spec::MountSpec> = bf
+        .mounts
+        .iter()
+        .map(|m| spec::MountSpec {
+            host: m.host.clone(),
+            guest: m.guest.clone(),
+            mode: m.mode.as_str().to_string(),
+        })
+        .collect();
+
+    CreateSpec {
+        name: bf.name.clone(),
+        image: bf.image.clone(),
+        packages: bf.packages.clone(),
+        docker_mode,
+        mounts,
+        home: if bf.box_config.home.is_empty() {
+            None
+        } else {
+            Some(bf.box_config.home.clone())
+        },
+        hostname: if bf.box_config.hostname.is_empty() {
+            None
+        } else {
+            Some(bf.box_config.hostname.clone())
+        },
+        init: bf.sandbox.init,
+        pull: bf.box_config.pull,
+        root: false,
+        boxfile_path: Some(spec.boxfile_path.clone()),
+        unshare: bf.sandbox.unshare.to_arg_string(),
+        backend: spec.backend.clone(),
+        uid: get_host_uid(),
+        dry_run: spec.dry_run,
+    }
+}
+
+fn get_host_uid() -> u32 {
+    #[cfg(unix)]
+    unsafe {
+        extern "C" {
+            fn getuid() -> u32;
+        }
+        getuid()
+    }
+    #[cfg(not(unix))]
+    {
+        1000
+    }
+}
+
+// ─── up ──────────────────────────────────────────────────────────────────────
+
+/// Create-if-absent then apply. The "just works" entry point.
+pub fn up(
+    spec: &UpSpec,
+    store: &dyn ProvisionStateStore,
+    runner: &dyn DistroboxRunner,
+) -> Result<UpOutcome, CboxError> {
+    let name = &spec.create_spec.name;
+
+    // Check if the box exists via inspect
+    let inspect_spec = InspectSpec {
+        name: name.clone(),
+        raw: false,
+        backend: spec.create_spec.backend.clone(),
+    };
+
+    let box_exists = match inspect(&inspect_spec, runner) {
+        Ok(_) => true,
+        Err(e) if e.exit_code() == crate::error::exit::UNAVAILABLE => false,
+        Err(e) if e.to_string().contains("not found") || e.to_string().contains("No box") => false,
+        // If inspect fails with a backend error that looks like not found, treat as absent
+        Err(e) if e.exit_code() == 125 => false,
+        Err(e) => return Err(e),
+    };
+
+    let created = if !box_exists {
+        // Create the box
+        let mut cs = spec.create_spec.clone();
+        cs.dry_run = spec.dry_run;
+        create(&cs, runner)?;
+        true
+    } else {
+        false
+    };
+
+    // Determine Boxfile path for apply
+    let boxfile_path = spec.create_spec.boxfile_path.clone().unwrap_or_else(|| {
+        // XDG fallback
+        let config_home = std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+            format!("{home}/.config")
+        });
+        format!("{config_home}/cbox/boxes/{name}/Boxfile.toml")
+    });
+
+    let apply_outcome = if created {
+        // Freshly created box: all provision steps run; no diff needed (box was just created from
+        // the Boxfile, so it matches by construction — except provision steps haven't run yet).
+        // Skip the inspect+diff that apply() would do; go straight to provision.
+        apply_fresh(name, &boxfile_path, spec, store, runner)?
+    } else {
+        // Existing box: full apply (inspect, diff, incremental provision)
+        let apply_spec = ApplySpec {
+            name: name.clone(),
+            boxfile_path,
+            force: spec.apply_force,
+            redo: spec.apply_redo.clone(),
+            no_provision: spec.no_provision,
+            recreate: spec.recreate,
+            yes: spec.yes,
+            dry_run: spec.dry_run,
+            backend: spec.create_spec.backend.clone(),
+        };
+        apply(&apply_spec, store, runner)?
+    };
+
+    Ok(UpOutcome {
+        ok: true,
+        action: "up".to_string(),
+        created,
+        name: name.clone(),
+        apply: apply_outcome,
+    })
+}
+
+/// Run provision steps for a freshly-created box (no diff, empty state, all steps run).
+fn apply_fresh(
+    name: &str,
+    boxfile_path: &str,
+    spec: &UpSpec,
+    store: &dyn ProvisionStateStore,
+    runner: &dyn DistroboxRunner,
+) -> Result<ApplyOutcome, CboxError> {
+    let (bf, _warnings) = boxfile::parse_file(boxfile_path)?;
+
+    if spec.no_provision {
+        return Ok(ApplyOutcome {
+            ok: true,
+            action: "apply".to_string(),
+            name: name.to_string(),
+            diff: DiffResult {
+                class: "Incremental".to_string(),
+                fields: Vec::new(),
+            },
+            recreate_required: false,
+            steps: Vec::new(),
+            summary: ApplySummary {
+                ran: 0,
+                skipped: 0,
+                copied: 0,
+                failed: 0,
+            },
+        });
+    }
+
+    let boxfile_dir = std::path::Path::new(boxfile_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+
+    let plan = provision::ProvisionPlan {
+        name,
+        steps: &bf.provision,
+        boxfile_dir,
+        backend: &spec.create_spec.backend,
+        force: true, // fresh box: always run all steps
+        redo: &[],
+        dry_run: spec.dry_run,
+    };
+
+    let mut state = ProvisionState::new();
+    let step_results = provision::provision(&plan, store, runner, &mut state)?;
+
+    let summary = summarize(&step_results);
+    Ok(ApplyOutcome {
+        ok: true,
+        action: "apply".to_string(),
+        name: name.to_string(),
+        diff: DiffResult {
+            class: "Incremental".to_string(),
+            fields: Vec::new(),
+        },
+        recreate_required: false,
+        steps: step_results,
+        summary,
+    })
 }

@@ -342,3 +342,91 @@ fn test_build_enter_argv_with_cmd() {
     let args = build_enter_argv(&spec);
     assert_args_contain(&args, &["enter", "--name", "web-dev", "--", "ls", "-la"]);
 }
+
+// ─── P2 argv builders (AC-ARGV-P2-1, AC-ARGV-P2-2, AC-ARGV-P2-3) ────────────
+
+// AC-ARGV-P2-1: build_provision_shell_argv golden test
+#[test]
+fn ac_argv_p2_1_provision_shell_argv() {
+    use cbox::dbox::argv::build_provision_shell_argv;
+
+    let args = build_provision_shell_argv("web-dev", "echo hi");
+    assert_eq!(
+        args,
+        vec!["enter", "--name", "web-dev", "--", "sh", "-c", "echo hi"],
+        "provision shell argv should match golden"
+    );
+}
+
+// AC-ARGV-P2-2: build_copy_argv golden test
+#[test]
+fn ac_argv_p2_2_copy_argv() {
+    use cbox::dbox::argv::build_copy_argv;
+
+    let args = build_copy_argv("web-dev", "./a", "/b");
+    assert_eq!(
+        args,
+        vec!["cp", "./a", "web-dev:/b"],
+        "copy argv should match golden"
+    );
+}
+
+// AC-ARGV-P2-3: build_create_argv now includes cbox.image label (additive to P1)
+#[test]
+fn ac_argv_p2_3_create_includes_image_label() {
+    let mut spec = base_spec("web-dev");
+    spec.image = "fedora-toolbox:40".to_string();
+    let args = build_create_argv(&spec);
+
+    let image_label = args
+        .iter()
+        .any(|a| a.contains("cbox.image=fedora-toolbox:40"));
+    assert!(
+        image_label,
+        "create argv should include cbox.image label, got: {args:?}"
+    );
+}
+
+// Additional P2 argv tests
+
+#[test]
+fn test_build_state_write_argv_escaping() {
+    use cbox::dbox::argv::build_state_write_argv;
+
+    let json = r#"{"steps":[{"result":"ok"}]}"#;
+    let args = build_state_write_argv("web-dev", json);
+
+    // Must have 7 elements: enter --name web-dev -- sh -c <cmd>
+    assert_eq!(args.len(), 7);
+    assert_eq!(args[0], "enter");
+    assert_eq!(args[1], "--name");
+    assert_eq!(args[2], "web-dev");
+    assert_eq!(args[3], "--");
+    assert_eq!(args[4], "sh");
+    assert_eq!(args[5], "-c");
+
+    let sh_cmd = &args[6];
+    assert!(sh_cmd.contains("mkdir"), "should create dir");
+    assert!(sh_cmd.contains("printf"), "should use printf");
+    assert!(
+        sh_cmd.contains("provision.json"),
+        "should reference provision.json"
+    );
+}
+
+#[test]
+fn test_build_state_read_argv_golden() {
+    use cbox::dbox::argv::build_state_read_argv;
+
+    let args = build_state_read_argv("web-dev");
+    assert_eq!(args[0], "enter");
+    assert_eq!(args[1], "--name");
+    assert_eq!(args[2], "web-dev");
+    assert_eq!(args[3], "--");
+    assert_eq!(args[4], "sh");
+    assert_eq!(args[5], "-c");
+    assert!(
+        args[6].contains("provision.json"),
+        "state read should reference provision.json"
+    );
+}

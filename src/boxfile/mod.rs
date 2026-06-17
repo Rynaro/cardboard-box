@@ -48,3 +48,16 @@ pub fn parse_file(path: &str) -> Result<(Boxfile, Vec<String>), CboxError> {
         .map_err(|e| CboxError::ioerr(format!("Cannot read Boxfile at \"{path}\": {e}")))?;
     parse_and_validate(&text)
 }
+
+/// Parse a Boxfile and also return its containing directory (for resolving relative copy src paths).
+#[allow(dead_code)]
+pub fn parse_file_with_base(
+    path: &str,
+) -> Result<(Boxfile, Vec<String>, std::path::PathBuf), CboxError> {
+    let (bf, warnings) = parse_file(path)?;
+    let base = std::path::Path::new(path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .to_path_buf();
+    Ok((bf, warnings, base))
+}

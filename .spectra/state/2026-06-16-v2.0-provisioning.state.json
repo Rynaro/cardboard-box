@@ -1,0 +1,21 @@
+{
+  "session_id": "cbox-v2.0-provisioning-2026-06-16",
+  "spec_id": "cbox-v2.0-provisioning",
+  "status": "delivered",
+  "confidence": 0.86,
+  "decision": "AUTO_PROCEED",
+  "phase_completed": "ASSEMBLE",
+  "grounded_against_code": true,
+  "key_grounding_correction": "container labels immutable post-create (podman 5.8.2 + docker 29.5.3 verified) -> v1.0 §8 cbox.provision.<idx> label scheme replaced by guest-side state file",
+  "flagged_decisions": ["DECISION-1 state-store", "DECISION-2 copy-mechanism", "DECISION-3 recreate-flow"],
+  "stories": [
+    {"id": "P2-1", "status": "pending", "depends_on": []},
+    {"id": "P2-2", "status": "pending", "depends_on": ["P2-1"]},
+    {"id": "P2-3", "status": "pending", "depends_on": ["P2-2"]},
+    {"id": "P2-4", "status": "pending", "depends_on": ["P2-1"]},
+    {"id": "P2-5", "status": "pending", "depends_on": ["P2-3", "P2-4"]},
+    {"id": "P2-6", "status": "pending", "depends_on": ["P2-5"]}
+  ],
+  "replanning_history": [],
+  "next_action": "maintainer reviews DECISION-1/2/3; Vivi implements on defaults if no override"
+}
