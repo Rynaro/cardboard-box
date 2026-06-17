@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/Rynaro/cardboard-box/compare/v0.2.1...v0.3.0) (2026-06-17)
+
+
+### Features
+
+* auto-discover Boxfile.toml in the current directory ([#5](https://github.com/Rynaro/cardboard-box/issues/5)) ([2a2d4c5](https://github.com/Rynaro/cardboard-box/commit/2a2d4c5a8b33baeee611cbe233929e9c3e46e11f))
+
 ## [0.2.1](https://github.com/Rynaro/cardboard-box/compare/v0.2.0...v0.2.1) (2026-06-17)
 
 
