@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/Rynaro/cardboard-box/compare/v0.4.1...v0.5.0) (2026-06-17)
+
+
+### Features
+
+* unified cross-backend box listing and per-box routing ([0cedfee](https://github.com/Rynaro/cardboard-box/commit/0cedfee093a2d336aa0841fb2b9ae828b407fd2d))
+* unified cross-backend box listing and per-box routing ([8335a5e](https://github.com/Rynaro/cardboard-box/commit/8335a5eed3648fc5e3d5b32f423a20298ec92fe6))
+
 ## [0.4.1](https://github.com/Rynaro/cardboard-box/compare/v0.4.0...v0.4.1) (2026-06-17)
 
 
