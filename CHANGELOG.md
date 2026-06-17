@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.1](https://github.com/Rynaro/cardboard-box/compare/v0.4.0...v0.4.1) (2026-06-17)
+
+
+### Bug Fixes
+
+* parse docker NDJSON ps output when listing boxes ([1f1eed5](https://github.com/Rynaro/cardboard-box/commit/1f1eed5fce0a03c921f7bf6f532d752b50557125))
+* probe for usable backend in the TUI instead of defaulting to podman ([f67a472](https://github.com/Rynaro/cardboard-box/commit/f67a47296f739a4532487a0ad74cc9833d94be52))
+* TUI lists docker-backed distroboxes again ([1b92474](https://github.com/Rynaro/cardboard-box/commit/1b9247487f18ebcd6d2800656e2aa15791bef38f))
+
 ## [0.4.0](https://github.com/Rynaro/cardboard-box/compare/v0.3.1...v0.4.0) (2026-06-17)
 
 
