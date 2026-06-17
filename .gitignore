@@ -3,6 +3,9 @@
 # case someone runs cargo natively.
 /target/
 
+# Extracted release binary (from `make dist`)
+/dist/
+
 # Local editor / OS cruft
 *.swp
 .DS_Store

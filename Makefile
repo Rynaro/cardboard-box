@@ -29,7 +29,7 @@ RUN := $(ENGINE) run --rm \
 	-w /work \
 	$(IMAGE)
 
-.PHONY: dev-init image volumes build release test lint fmt fmt-check check shell clean nuke
+.PHONY: dev-init image volumes build release dist install test lint lint-lean fmt fmt-check check shell clean nuke
 
 ## One-time: build the toolchain image and prepare writable named volumes.
 dev-init: image volumes
@@ -51,6 +51,25 @@ build:
 
 release:
 	$(RUN) cargo build --release
+
+# The release binary is built inside the cbox_target volume (clean-host guarantee),
+# so it must be EXTRACTED to be usable. `dist` drops it in ./dist; `install` copies
+# it onto your PATH (override PREFIX to change where).
+PREFIX ?= $(HOME)/.local
+
+dist: release
+	@mkdir -p "$(CURDIR)/dist"
+	$(ENGINE) run --rm --user $(UID):$(GID) \
+		-v cbox_target:/target -v "$(CURDIR)/dist":/out \
+		$(IMAGE) cp /target/release/cbox /out/cbox
+	@echo "✓ binary extracted to ./dist/cbox"
+
+install: release
+	@mkdir -p "$(PREFIX)/bin"
+	$(ENGINE) run --rm --user $(UID):$(GID) \
+		-v cbox_target:/target -v "$(PREFIX)/bin":/out \
+		$(IMAGE) cp /target/release/cbox /out/cbox
+	@echo "✓ installed cbox to $(PREFIX)/bin/cbox  (ensure $(PREFIX)/bin is on your PATH)"
 
 test:
 	$(RUN) cargo test
