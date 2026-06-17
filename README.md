@@ -1,54 +1,137 @@
-# The Cardboard Box (`cbox`)
+<p align="center">
+  <img src="assets/cardbox-logo.jpeg" alt="The Cardboard Box — a pixel-art cardboard box with Ubuntu, Debian, and Fedora emblems bursting out" width="320">
+</p>
 
-[![CI](https://github.com/Rynaro/cardboard-box/actions/workflows/ci.yml/badge.svg)](https://github.com/Rynaro/cardboard-box/actions/workflows/ci.yml)
-[![Release](https://github.com/Rynaro/cardboard-box/actions/workflows/release.yml/badge.svg)](https://github.com/Rynaro/cardboard-box/actions/workflows/release.yml)
-[![Latest release](https://img.shields.io/github/v/release/Rynaro/cardboard-box?sort=semver)](https://github.com/Rynaro/cardboard-box/releases/latest)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+<h1 align="center">The Cardboard Box</h1>
+<p align="center"><strong><code>cbox</code></strong> — declarative, cozy management for <code>distrobox</code></p>
 
-**A cozy distrobox manager** — Vagrant-inspired declarative box provisioning, a beautiful terminal cockpit, and a clean CLI for everyone.
-
-`cbox` raises `distrobox` from an advanced-user tool to "just works": single static binary, zero external scripting, and a docker-access spectrum from fully-decoupled to host-Docker-visible to isolated-nested. All three implementation phases are complete: CLI lifecycle, Boxfile-driven provisioning, and a TUI that dogfoots the same mechanisms.
-
----
-
-## Status
-
-**Package version: `0.1.0` (pre-1.0, actively developed).** All three implementation phases are complete and 129 tests pass on `G-NO-NET` (zero real distrobox in CI).
-
-> Note: the "Phase 1 / Phase 2 / Phase 3" labels below are internal spec-phase numbers,
-> not the package version. The package version is `0.1.0` and follows
-> [SemVer](https://semver.org/) via [Conventional Commits](https://www.conventionalcommits.org/).
-> See [RELEASING.md](RELEASING.md) for the versioning policy.
-
-- **Phase 1:** CLI lifecycle — `create`, `list`, `rm`/`destroy`, `enter`/`use`, `inspect`/`show`, `edit`, `doctor`. Boxfile schema & the docker-mode spectrum.
-- **Phase 2:** Provisioning engine — `apply` & `up` with idempotent per-step execution, Boxfile↔live diffing, incremental convergence.
-- **Phase 3:** TUI — `cbox` (no args) or `cbox tui` launches a cozy terminal cockpit (list, inspect, create wizard, apply progress, Boxfile editor).
-
-**Honest notes:**
-- `cbox` wraps the real `distrobox` CLI by spawning it — it does not reimplement distrobox.
-- Linux-only (distrobox is Linux-only).
-- Requires `distrobox ≥ 1.6` and a backend (`podman` preferred, or `docker`).
-- "Sandbox" (`docker = none`) means **decoupled from the host container runtime**, not a security boundary. distrobox runs `--privileged --security-opt label=disable` by default; `cbox` adds optional `--unshare-*` hardening, but isolation is still limited. Honest framing in docs.
-- Tests use mock/stub runners; real-host validation is via smoke tests (`#[ignore]`, manual run).
+<p align="center">
+  <a href="https://github.com/Rynaro/cardboard-box/actions/workflows/ci.yml"><img src="https://github.com/Rynaro/cardboard-box/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Rynaro/cardboard-box/actions/workflows/release.yml"><img src="https://github.com/Rynaro/cardboard-box/actions/workflows/release.yml/badge.svg" alt="Release"></a>
+  <a href="https://github.com/Rynaro/cardboard-box/releases/latest"><img src="https://img.shields.io/github/v/release/Rynaro/cardboard-box?sort=semver" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/Made%20with-Rust-orange?logo=rust" alt="Made with Rust"></a>
+  <img src="https://img.shields.io/badge/platform-Linux-blue?logo=linux" alt="Platform: Linux">
+</p>
 
 ---
 
-## Highlights
+## Welcome to cbox
 
-### Cozy, just-works CLI
-Seven subcommands: `create`, `list`, `rm` (alias `destroy`), `enter` (alias `use`), `inspect` (alias `show`), `edit`, `doctor`, plus `apply` and `up` for provisioning. Global `--json` for scripting, `--dry-run` to preview, `-v` for debugging.
+`distrobox` is wonderful—it lets you run any Linux distro as a lightweight container, keeping your host pristine. But after the thirtieth time you're memorizing flags, hand-mounting sockets, and re-typing the same `distrobox create` incantation, you realize: this should be simpler.
 
-### The docker-access spectrum: `docker = none | host | nested`
-**Exactly one legible knob** across the sandbox↔host-docker tradeoff:
+**`cbox` is that simpler.** One friendly CLI. One declarative `Boxfile.toml` (Vagrant for distrobox). A beautiful terminal cockpit if you want it. Your Linux environments, unboxed and cozy.
 
-- **`none`** (default): no special container-runtime access. Box is decoupled. Optionally harden with `--unshare-*` (netns, ipc, process, etc.).
-- **`host`**: mount the host's container socket into the box (podman or docker, auto-detected). Containers you create inside the box appear in `docker ps` on the host — "I want my host Docker here."
-- **`nested`**: a private Docker daemon inside the box. Containers are isolated, not visible on the host. True DinD.
+---
 
-Each mode is a **named bundle of exact flags** — no guessing. Boxfile field `docker = "host"` or `docker = "nested"` expands to the right mounts/packages/flags at create time.
+## Why cbox?
 
-### Vagrant-style declarative provisioning
-A `Boxfile.toml` (TOML, not YAML) declares the box's intent once, and `cbox up` and `cbox apply` make it real:
+📦 **You keep the focus on distrobox.** `cbox` wraps the real thing—it doesn't reimplement it. Your knowledge transfers directly; the CLI just handles the repetition.
+
+🎯 **Docker access, one legible knob.** Three modes (`none`, `host`, `nested`)—not a free-form field. Each is a named bundle of exact flags. Pick one; the rest is decided.
+
+♻️ **Idempotent provisioning.** Declare your box once in a `Boxfile`. Run `cbox apply` or `cbox up`. Second time? Only changed steps re-run. Drift is math, not magic.
+
+✨ **The TUI is the acceptance test.** Not just a shell-over-CLI. It reuses the exact same core logic—zero duplication, zero drift risk. And if you prefer the command line, it's equally first-class.
+
+🔧 **Just works.** Static binary, containerized build (your host stays pristine), built-in `cbox doctor` to catch issues early.
+
+---
+
+## A first taste
+
+### Create and enter a box imperatively
+
+```bash
+cbox create web-dev -i fedora-toolbox:latest
+cbox enter web-dev
+```
+
+### Or go declarative with a Boxfile
+
+`Boxfile.toml`:
+```toml
+name = "web-dev"
+image = "fedora-toolbox:latest"
+packages = ["git", "ripgrep", "rust"]
+docker = "host"
+
+[[mounts]]
+host = "/home/me/code"
+guest = "/code"
+```
+
+Then:
+```bash
+cbox up web-dev --file Boxfile.toml
+cbox list
+cbox enter web-dev
+```
+
+That's it. The box is live, provisioned, and ready.
+
+---
+
+## What makes it cozy
+
+### A just-works CLI
+
+Seven core subcommands: `create`, `list`, `rm` (alias `destroy`), `enter` (alias `use`), `inspect` (alias `show`), `edit`, `doctor`. Plus `apply` and `up` for provisioning. Global flags for scripting: `--json`, `--dry-run`, `-v` for debugging, `-y` to skip confirmations.
+
+```bash
+cbox list --json | jq .
+cbox apply web-dev --dry-run    # preview changes
+cbox doctor                      # health check
+```
+
+### The docker-access spectrum: `none | host | nested`
+
+**Exactly one legible knob** across the sandbox ↔ host-Docker tradeoff:
+
+- **`none`** (default): box is decoupled from the host runtime. Clean separation. Optionally harden with `--unshare-*` flags.
+- **`host`**: mount the host's container socket into the box (auto-detects podman or docker). Containers you create inside the box appear in `docker ps` on the host.
+- **`nested`**: a private Docker daemon inside the box. Containers are isolated, not visible on the host. True Docker-in-Docker.
+
+Each mode is a **named bundle**—no guessing. Set `docker = "host"` in the Boxfile; the rest is automatic.
+
+<details>
+<summary>More: the docker modes explained</summary>
+
+**`docker = "none"` (default)**
+
+```toml
+docker = "none"
+[sandbox]
+unshare = ["netns", "ipc"]  # optional hardening
+```
+
+Inside the box, `docker ps` or `podman ps` fail with "cannot connect" — no socket. Useful for isolated development.
+
+**`docker = "host"`**
+
+```toml
+docker = "host"
+```
+
+Auto-detection picks podman or docker based on your host's backend:
+- **On podman host:** mount `/run/user/$UID/podman/podman.sock` and install `podman-remote`.
+- **On docker host:** mount `/var/run/docker.sock` and install `docker-cli`.
+
+Result: `docker ps` in the box == `docker ps` on the host.
+
+**`docker = "nested"`**
+
+```toml
+docker = "nested"
+```
+
+Install `docker-ce` inside the box. `--init` is added (systemd). No host socket is mounted. True isolation.
+
+</details>
+
+### Declarative `Boxfile.toml`
+
+A single TOML file declares your box's intent. Run `cbox up` or `cbox apply` to make it real. Idempotent by design—second apply skips unchanged steps. Portable—copy to another host, run `cbox up`, same box.
 
 ```toml
 name = "web-dev"
@@ -70,73 +153,68 @@ src = "./dotfiles/.bashrc"
 dst = "/home/me/.bashrc"
 ```
 
-Idempotent by design. Second `apply` skips unchanged steps. Boxfiles are portable — copy to another host, run `cbox up`, same box.
+### The TUI cockpit
 
-### TUI: the cozy terminal cockpit
-**`cbox` (no args)** on a TTY launches the cockpit. List your boxes, inspect, create a new one via a wizard, apply provisioning with live step progress, edit Boxfiles in your `$EDITOR`, and `enter` a box with a real TTY. Everything the CLI does, but beautifully interactively.
+Run `cbox` with no arguments on a TTY and you get a cozy terminal UI. List your boxes, inspect one, create via a wizard, apply provisioning with live progress, edit Boxfiles in your `$EDITOR`, and enter boxes—all with arrow keys and a few key presses.
 
-The TUI reuses the exact same `core::` logic as the CLI — **zero duplication**, zero chance of drift. Feature-gated (on by default); build lean with `--no-default-features` if you prefer the CLI only.
+The TUI reuses the exact same `core::` logic as the CLI. **Zero duplication**, zero drift. Feature-gated by default; build lean with `--no-default-features` if you prefer CLI only.
+
+```bash
+cbox
+# → launches the terminal cockpit
+```
+
+Key bindings: `↑↓` move, `c` create, `d` destroy, `a` apply, `e` edit, `enter` inspect/enter, `?` doctor, `q` quit.
 
 ---
 
-## Install / Build
+## Install
 
-### Recommended: containerized build (the clean-host guarantee)
+### Recommended: containerized build (clean-host guarantee)
 
-The project ships a `.devcontainer` with the Rust toolchain. All builds, tests, and linting happen inside a container; your host stays pristine. Because of that, build artifacts live in a named Docker volume — **not** in a `target/` directory on your host — so the finished binary is *extracted* with `make install` (or `make dist`) rather than read out of `target/`.
+The project ships a `.devcontainer` with the Rust toolchain. All builds, tests, and linting happen inside a container—your host stays pristine. The finished binary is extracted with `make install` or `make dist`, not read from a bare-host `target/` directory.
 
 ```bash
-# First time only — build the toolchain image + prepare volumes
+# First time only
 make dev-init
 
-# Build and install the binary onto your PATH (~/.local/bin by default)
+# Build and install
 make install
-# → ✓ installed cbox to ~/.local/bin/cbox
-#   override the location:  make install PREFIX=/usr/local   (may need sudo for system paths)
+# → installed cbox to ~/.local/bin/cbox
+#   override with: make install PREFIX=/usr/local
 
-# …or just drop the binary in ./dist without touching your PATH
+# Or just drop the binary in ./dist
 make dist
 # → ./dist/cbox
-
-# Compile only (artifact stays in the volume)
-make build      # debug
-make release    # optimized
-
-# Run tests (zero real distrobox needed — mocks prove everything)
-make test
-
-# Lint both feature configs; format
-make lint        # --all-features
-make lint-lean   # --no-default-features (TUI off)
-make fmt
-
-# Everything CI gates on, in one shot
-make check
-
-# Interactive shell inside the dev container (for poking around)
-make shell
-
-# Blow away build artifacts (keeps cargo cache) / full reset
-make clean
-make nuke
 ```
 
-The `Makefile` handles the Docker/Podman image, named volumes for the cargo cache + build artifacts, and user ID / GID mapping so any files written back to the source tree stay yours. **Do not run bare `cargo` on the host** — the Makefile is the supported path, and it's what keeps your host clean.
+**Other make targets:**
+```bash
+make build         # debug build
+make release       # optimized build
+make test          # run all 129 tests (zero real distrobox needed)
+make check         # full CI gate: fmt + lint + build + test
+make shell         # interactive shell inside the dev container
+make clean         # remove build artifacts
+make nuke          # full reset (remove image + volumes)
+```
 
-### Runtime prerequisites (on the host, once)
+Do **not** run bare `cargo` on the host — the Makefile is the supported path.
+
+### Runtime prerequisites
+
+On the host, once:
 
 ```bash
 # Install distrobox (≥1.6 required)
-# On Fedora:
 sudo dnf install distrobox
 
-# Install a backend (podman preferred)
+# Install a backend (podman preferred, or docker)
 sudo dnf install podman
-# or docker:
-sudo dnf install docker
+# or: sudo dnf install docker
 ```
 
-Verify your setup:
+Then verify:
 ```bash
 cbox doctor
 ```
@@ -150,26 +228,18 @@ cbox doctor
 cbox doctor
 ```
 
-Output (human):
+Output:
 ```
 ✓ distrobox 1.8.2.4 (supported)
 ✓ podman 5.8.2 (selected backend)
 ```
 
-### 2. Create a simple box
+### 2. Create a box
 ```bash
 cbox create web-dev -i fedora-toolbox:latest
 ```
 
-Or declare it in a `Boxfile.toml`:
-```toml
-name = "web-dev"
-image = "fedora-toolbox:latest"
-packages = ["git", "ripgrep", "rust"]
-docker = "none"
-```
-
-Then:
+Or use a Boxfile:
 ```bash
 cbox up web-dev --file Boxfile.toml
 ```
@@ -179,7 +249,6 @@ cbox up web-dev --file Boxfile.toml
 cbox list
 ```
 
-Table output:
 ```
 NAME      STATUS    IMAGE                              DOCKER  CBOX?
 web-dev   running   fedora-toolbox:latest             none    ✓
@@ -202,7 +271,6 @@ cbox enter web-dev
 cbox apply web-dev
 ```
 
-Output (mixed):
 ```
 Applying Boxfile for "web-dev" …
   packages   ✓ up to date (git, ripgrep, rust)
@@ -210,60 +278,50 @@ Applying Boxfile for "web-dev" …
 ✓ Box "web-dev" is up to date (0 steps ran)
 ```
 
-Changes something in the Boxfile, run `apply` again — it diffs and converges only what changed.
-
-### 6. TUI (interactive)
-```bash
-cbox
-# → launches the terminal cockpit (if on a TTY)
-```
-
-Or explicitly:
-```bash
-cbox tui
-```
-
-Key bindings: arrow keys to move, `c` to create, `d` to destroy, `a` to apply, `e` to edit, `enter` to inspect or open, `q` to quit.
+Changes something in the Boxfile? Run `apply` again—it diffs and converges only what changed.
 
 ---
 
-## Command Reference
+## Reference
 
-All commands honor global flags: `--json`, `-q`/`--quiet`, `-v` (show argv), `-vv` (stream child output), `--no-color`, `-y`/`--yes` (skip confirms), `--dry-run` (preview), `--backend podman|docker` (override detection).
+<details>
+<summary><strong>Command reference</strong></summary>
+
+All commands honor global flags: `--json`, `-q`/`--quiet`, `-v` (show argv), `-vv` (stream child output), `--no-color`, `-y`/`--yes` (skip confirms), `--dry-run`, `--backend podman|docker`.
 
 | Command | Aliases | Purpose | Key flags |
 |---------|---------|---------|-----------|
 | `cbox create <NAME>` | — | Create a box imperatively or from a Boxfile | `-i/--image`, `-p/--package` (repeatable), `-m/--mount` (repeatable), `--docker none\|host\|nested`, `--home`, `--hostname`, `--init`, `--pull`, `--file`, `--dry-run` |
-| `cbox list` | — | List boxes (human table or `--json` machine) | `-a/--all` (include non-cbox boxes), `--json` |
+| `cbox list` | — | List boxes (human table or `--json`) | `-a/--all` (include non-cbox boxes), `--json` |
 | `cbox rm <NAME>...` | `destroy` | Remove boxes (confirm unless `-y`) | `-f/--force`, `--rm-home`, `-y`, `--all` |
-| `cbox enter <NAME>` | `use` | Enter a box interactively; pass commands with `-- <CMD>` | `--root`, `--clean-path` |
-| `cbox inspect <NAME>` | `show` | Inspect a box (human panel or `--json`) | `--json`, `--raw` (raw backend JSON) |
-| `cbox edit <NAME>` | — | Edit a box's Boxfile in `$EDITOR` (hand off to your editor, revalidate) | `--file <PATH>` (edit a Boxfile directly) |
-| `cbox apply <NAME>` | — | Converge a box to its Boxfile (incremental provisioning) | `--file`, `--force`, `--redo <IDX>`, `--no-provision`, `--recreate`, `--dry-run`, `--json` |
-| `cbox up <NAME>` | — | Create-if-absent then apply (the "just works" entry point) | All create + apply flags |
+| `cbox enter <NAME>` | `use` | Enter a box interactively | `--root`, `--clean-path` |
+| `cbox inspect <NAME>` | `show` | Inspect a box (human panel or `--json`) | `--json`, `--raw` |
+| `cbox edit <NAME>` | — | Edit a box's Boxfile in `$EDITOR` | `--file <PATH>` |
+| `cbox apply <NAME>` | — | Converge a box to its Boxfile | `--file`, `--force`, `--redo <IDX>`, `--no-provision`, `--recreate`, `--dry-run`, `--json` |
+| `cbox up <NAME>` | — | Create-if-absent then apply | All create + apply flags |
 | `cbox doctor` | — | Preflight: distrobox + backend health | `--json` |
-| `cbox` (no args) | `cbox tui` | Launch the TUI (TTY only) | `--json` rejected (interactive only) |
+| `cbox` (no args) | `cbox tui` | Launch the TUI (TTY only) | — |
 
-**Aliases:** `destroy` is `rm`, `use` is `enter`, `show` is `inspect`.
+</details>
 
-### Exit codes (sysexits-aligned)
+<details>
+<summary><strong>Exit codes</strong></summary>
 
 | Code | Meaning |
 |------|---------|
 | 0 | Success |
 | 64 | Usage error (bad CLI args, invalid name, `--json` on interactive) |
-| 65 | Data error (invalid Boxfile, missing source for copy step, recreate required without `--recreate`) |
+| 65 | Data error (invalid Boxfile, missing source for copy step) |
 | 69 | Unavailable (box does not exist) |
 | 70 | Software error (distrobox missing, or TUI built without `tui` feature) |
 | 74 | I/O error (spawn/capture failure, guest state-file corruption) |
 | 75 | Temporary failure (backend unreachable) |
-| 125 | Backend non-zero (wrapped distrobox exited non-zero; child code and stderr surfaced) |
+| 125 | Backend non-zero (wrapped distrobox exited non-zero) |
 
----
+</details>
 
-## The Boxfile
-
-### Full schema (with comments)
+<details>
+<summary><strong>Boxfile schema</strong></summary>
 
 ```toml
 # Boxfile.toml — declarative box manifest (Vagrant-for-distrobox)
@@ -310,72 +368,29 @@ src = "./dotfiles/.bashrc"                           # string, required if type=
 dst = "/home/me/.bashrc"                             # string, required if type="copy", absolute path
 ```
 
-### Field reference
-
 | Path | Type | Default | Required | Notes |
 |------|------|---------|----------|-------|
-| `name` | string | — | **yes** | Must match regex; validated client-side before any spawn |
-| `image` | string | `registry.fedoraproject.org/fedora-toolbox:latest` | no | Registry prefix auto-added if missing (Fedora default) |
-| `packages` | list<string> | `[]` | no | Installed at create time via `--additional-packages` |
-| `docker` | enum | `"none"` | no | `"none"` (decoupled), `"host"` (host Docker visible), `"nested"` (private Docker-in-Docker) |
-| `mounts[].host` | string | — | yes-in-entry | Absolute path on host. Can be relative to Boxfile dir in `provision` copy steps only |
-| `mounts[].guest` | string | — | yes-in-entry | Absolute path inside box. Must be unique per box |
+| `name` | string | — | **yes** | Must match regex |
+| `image` | string | `registry.fedoraproject.org/fedora-toolbox:latest` | no | Registry prefix auto-added if missing |
+| `packages` | list<string> | `[]` | no | Installed at create time |
+| `docker` | enum | `"none"` | no | `"none"` (decoupled), `"host"` (host Docker visible), `"nested"` (private DinD) |
+| `mounts[].host` | string | — | yes-in-entry | Absolute path on host |
+| `mounts[].guest` | string | — | yes-in-entry | Absolute path inside box |
 | `mounts[].mode` | enum | `"rw"` | no | `"ro"` (read-only) or `"rw"` (read-write) |
-| `sandbox.unshare` | list\<enum\> or `"all"` | `[]` | no | Namespace options; only meaningful with `docker="none"` |
-| `sandbox.init` | bool | `false` | no | Enable systemd inside box (implies `--unshare-process`) |
-| `box.home` | string | `""` | no | Custom home directory path in box (default: shared host home) |
+| `sandbox.unshare` | list<enum> or `"all"` | `[]` | no | Namespace options (meaningful with `docker="none"`) |
+| `sandbox.init` | bool | `false` | no | Enable systemd inside box |
+| `box.home` | string | `""` | no | Custom home directory path in box |
 | `box.hostname` | string | `""` | no | Custom hostname inside box |
 | `box.pull` | bool | `false` | no | Force pull image at create time |
-| `provision[].type` | enum | — | yes-in-entry | `"shell"` (run a command) or `"copy"` (copy file) |
-| `provision[].run` | string | — | if `type="shell"` | Shell command (e.g., `"dnf install rustup"`) |
-| `provision[].src` | string | — | if `type="copy"` | Source file (on host); relative to Boxfile directory |
-| `provision[].dst` | string | — | if `type="copy"` | Destination path (in box); must be absolute |
+| `provision[].type` | enum | — | yes-in-entry | `"shell"` or `"copy"` |
+| `provision[].run` | string | — | if `type="shell"` | Shell command |
+| `provision[].src` | string | — | if `type="copy"` | Source file (on host), relative to Boxfile dir |
+| `provision[].dst` | string | — | if `type="copy"` | Destination path (in box), must be absolute |
 
-### Docker modes — the spectrum explained
+</details>
 
-**`docker = "none"` (default)**
-
-The box has **no** access to the host container runtime. Clean separation.
-
-```toml
-docker = "none"
-[sandbox]
-unshare = ["netns", "ipc"]  # optional hardening
-```
-
-Inside the box, `docker ps` or `podman ps` fail with "cannot connect" — no socket, no client configured. Useful for isolated development environments.
-
-**`docker = "host"`**
-
-Mount the **host's** container socket into the box. Containers you create inside the box are **visible on the host**.
-
-```toml
-docker = "host"
-```
-
-Auto-detection picks podman or docker based on your host's backend. Exact steps:
-
-- **On podman host:** mount `/run/user/$UID/podman/podman.sock:/run/user/$UID/podman/podman.sock` and install `podman-remote`.
-- **On docker host:** mount `/var/run/docker.sock:/var/run/docker.sock` and install `docker-cli`.
-
-Result: `docker ps` in the box == `docker ps` on the host. Containers created in the box appear in your host's Docker Dashboard. The headline use case: "I want my Docker/Podman accessible from inside this box."
-
-**`docker = "nested"`**
-
-A **private** Docker daemon lives inside the box. Containers it creates are **not** visible on the host.
-
-```toml
-docker = "nested"
-```
-
-Steps:
-- Install `docker-ce` (or `podman` for rootless).
-- `--init` is added (systemd, so the in-box daemon can be managed).
-- **No** host socket is mounted.
-
-Result: `docker ps` in the box is isolated; the host's `docker ps` does not see those containers. True nesting. Use case: isolated CI environment, development sandbox.
-
-### Idempotency & the apply flow
+<details>
+<summary><strong>Idempotency & the apply flow</strong></summary>
 
 **`cbox up`** (create-if-absent, then apply):
 ```bash
@@ -391,7 +406,7 @@ cbox apply web-dev
 
 Diffs the Boxfile against the live box:
 - **Incremental changes** (added packages, new provision steps): run and record.
-- **Recreate-class changes** (image changed, docker mode changed, mounts changed): prompt `Recreate "web-dev"? [y/n]` (skip with `-y` or `--recreate`). Recreate destroys + recreates; your `$HOME` is preserved (shared mount), but box-local changes are lost.
+- **Recreate-class changes** (image changed, docker mode changed, mounts changed): prompt `Recreate "web-dev"? [y/n]` (skip with `-y` or `--recreate`).
 
 **Dry-run:**
 ```bash
@@ -400,183 +415,80 @@ cbox apply web-dev --dry-run
 
 Prints the plan (which steps would SKIP or RUN, which fields differ) without executing anything.
 
----
+</details>
 
-## TUI
+<details>
+<summary><strong>TUI screens</strong></summary>
 
-### Launch
-
-```bash
-cbox
-# or explicitly:
-cbox tui
-```
-
-Only works on a TTY; non-interactive stdin/stdout falls back to printing help + exit code 64.
-
-### Screens
-
-- **List** (home): table of boxes (NAME | STATUS | IMAGE | DOCKER | CBOX?). Arrow keys to move, `c` to create, `d` to destroy, `a` to apply, `e` to edit, `enter` to inspect or enter (if running), `?` for doctor, `q` to quit.
+- **List (home)**: table of boxes (NAME | STATUS | IMAGE | DOCKER | CBOX?). Arrow keys to move, `c` to create, `d` to destroy, `a` to apply, `e` to edit, `enter` to inspect or enter (if running), `?` for doctor, `q` to quit.
 - **Detail (inspect)**: key/value panel for a selected box. `e` to edit its Boxfile, `a` to apply, `enter` to enter.
 - **Create wizard**: step through name, image, packages, docker-mode picker, confirm.
 - **Apply / up progress**: per-step list (idx | type | status | duration). SKIP (dim), RAN (green), COPIED (green), FAILED (red).
 - **Doctor panel**: distrobox version + backend health. Auto-pops if backend is unreachable.
-- **Boxfile editor**: hands off to your `$EDITOR` (alt-screen is suspended), revalidates on save, restores the TUI.
+- **Boxfile editor**: hands off to your `$EDITOR` (alt-screen suspended), revalidates on save, restores the TUI.
 
-### Key hints
+</details>
 
-Bottom status bar shows context hints. `↑↓ move · enter inspect · c create · d destroy · a apply · e edit · ? doctor · q quit`.
+<details>
+<summary><strong>Architecture & design</strong></summary>
 
----
-
-## Development
-
-### Targets
-
-```bash
-make dev-init      # one-time: build toolchain image + named volumes
-make build         # debug build (artifact stays in the volume)
-make release       # optimized release build (artifact stays in the volume)
-make install       # build release + copy binary to PREFIX/bin (default ~/.local/bin)
-make dist          # build release + copy binary to ./dist/cbox
-make test          # run all tests (zero real distrobox; mocks + MockRunner)
-make lint          # clippy --all-features (tui on)
-make lint-lean     # clippy --no-default-features (tui off — catches feature-flag bugs)
-make fmt           # cargo fmt
-make fmt-check     # check formatting without modifying
-make check         # full CI gate: fmt-check + lint + lint-lean + build + test
-make shell         # interactive bash inside the dev container
-make clean         # remove build artifacts (keep cargo cache)
-make nuke          # remove image + all named volumes (full reset)
-```
-
-### Test suite
-
-**129 tests**, all mock-driven:
-- **Unit tests** (`tests/argv_builder.rs`): pure flag-mapping functions, deterministic golden.
-- **Integration tests** (`tests/create.rs`, `tests/list.rs`, etc.): commands against `MockRunner` (no real distrobox spawn).
-- **Acceptance criteria** (AC-*): GIVEN/WHEN/THEN per spec, matching sections §7 of each spec document.
-- **Smoke tests** (`#[ignore]`): optional real-distrobox checks (manual run, gated on host having distrobox). Run with `make smoke` or `cargo test -- --ignored --test-threads 1`.
-
-**CI gate:** `G-NO-NET` — full test suite passes with zero distrobox/podman/docker installed. The runner trait seam + MockRunner prove all logic without external tools.
-
-### Architecture
-
-```
-main.rs → cli/ (clap parse + output)
-             └→ core/ (logic, DistroboxRunner seam)
-                     ├→ dbox/ (process wrapper, argv builders)
-                     └→ boxfile/ (Boxfile model, validation)
-             └→ tui/ (ratatui cockpit, reuses core/)
-                    └→ (no cli imports; only core + boxfile)
-```
-
-**Layering rule (enforced):** `cli → core → {dbox, boxfile}` + `tui → core` only. No `tui → cli`, no backwards deps. This makes the TUI a pure add-on; zero core changes in Phase 3.
+**Layering rule (enforced):** `cli → core → {dbox, boxfile}` + `tui → core` only. No backwards dependencies. This makes the TUI a pure add-on; zero core changes needed for Phase 3.
 
 **Seams:**
-- **`DistroboxRunner` trait** (`src/dbox/runner.rs`): `RealRunner` spawns `distrobox`; `MockRunner` is a programmable test double. All commands call through this seam.
-- **`ProvisionStateStore` trait** (`src/core/state_store.rs`): state lives guest-side in `~/.local/state/cbox/provision.json` (P2). Swappable for tests.
+- **`DistroboxRunner` trait** (`src/dbox/runner.rs`): `RealRunner` spawns `distrobox`; `MockRunner` is a test double. All commands call through this seam. Makes **100% of command logic unit-testable** against `MockRunner` in CI without any real distrobox installed.
+- **`ProvisionStateStore` trait** (`src/core/state_store.rs`): state lives guest-side in `~/.local/state/cbox/provision.json`. Swappable for tests.
 
-### Error handling
+**Three phases:**
+- **Phase 1 (CLI lifecycle):** Seven subcommands + DistroboxRunner seam + docker-spectrum knob.
+- **Phase 2 (Provisioning):** `cbox apply` + `cbox up` + idempotent per-step provisioning.
+- **Phase 3 (TUI):** `cbox` or `cbox tui` launches a TEA (Model–Message–update–view) cockpit. Reuses the exact `core::` functions.
 
-- **Core/dbox layers:** typed `CboxError` + `RunnerError` enums (thiserror); each variant carries an exit code.
-- **`main.rs` edge:** map to `anyhow::Context` for ergonomic rendering; exit via `std::process::exit(code)`.
-- **Rule:** a wrapped child's non-zero exit is **never** silently swallowed. It becomes `CboxError::backend_error(code, stderr_tail, argv)` → exit 125, so the user always sees the exact command and last 5 stderr lines.
+**Test coverage:**
+- **129 tests**, all mock-driven.
+- **Unit tests** (`tests/argv_builder.rs`): pure flag-mapping functions.
+- **Integration tests** (`tests/create.rs`, `tests/list.rs`, etc.): commands against `MockRunner`.
+- **CI gate** (`G-NO-NET`): full test suite passes with zero distrobox/podman/docker installed.
 
-### Dependencies
-
-| Crate | Purpose | Why |
-|-------|---------|-----|
-| `clap` (derive) | CLI parsing | L1-locked; Derive API maps 1:1 to subcommands |
-| `anyhow` | Error context at `main.rs` | Ergonomic rendering |
-| `thiserror` | Typed errors (core) | Matchable + embedded exit codes |
-| `serde` + `toml` | Boxfile parse | L3-locked TOML; serde derives |
-| `serde_json` | JSON output + backend `ps/inspect` parsing | `--json` mode + reading podman/docker JSON |
-| `sha2` | Idempotency hashing (P2) | Content-hash for provision steps |
-| `ratatui` + `crossterm` | TUI (P3, feature-gated) | L1-locked; feature = `"tui"` (on by default) |
-
-**Deliberately excluded:** no `tokio`/async (sync core, worker thread for blocking), no `reqwest`/network (distrobox/backend handle pulls), no config framework (labels + Boxfile are state).
+</details>
 
 ---
 
-## Architecture & Design
+## Honest notes
 
-### Three-phase design
+**`cbox` wraps the real `distrobox`** by spawning it—it does not reimplement distrobox. Your knowledge transfers directly.
 
-**Phase 1 (v1.0 — CLI lifecycle):** Seven subcommands + the DistroboxRunner seam + the docker-spectrum knob. Foundation.
+**Linux-only.** distrobox is Linux-only; so is cbox.
 
-**Phase 2 (v2.0 — Provisioning engine):** `cbox apply` + `cbox up` + idempotent per-step provisioning. Guest-side state file (since container labels are immutable post-create). Incremental convergence.
+**Runtime requirements:** `distrobox ≥ 1.6` and a backend (`podman` preferred, or `docker`).
 
-**Phase 3 (v3.0 — TUI):** `cbox` or `cbox tui` launches a TEA (Model–Message–update–view) cockpit. Reuses the exact `core::` functions; zero duplication, zero drift.
+**Sandbox is not a security boundary.** The `none` docker mode means **decoupled from the host container runtime**, not isolated. distrobox runs `--privileged --security-opt label=disable` by default. `cbox` adds optional `--unshare-*` hardening, but true isolation requires a separate VM.
 
-### Process wrapper seam
+**Tests use mocks.** All 129 tests run without any real distrobox installed. Real-host validation happens via optional smoke tests (`#[ignore]`, manual run).
 
-Every distrobox/podman/docker spawn goes through `&dyn DistroboxRunner` — a trait with `run()` (Capture/DryRun modes) and `run_interactive()` (TTY pass-through). This makes **100% of command logic unit-testable** against `MockRunner` in CI without any real distrobox installed.
+**No secrets support yet.** v1.0 does not support embedded secrets. `[[provision]].run` is plain text in the Boxfile (trust boundary = your Boxfile). For sensitive data, store it outside the Boxfile (e.g., in `$HOME/.env`, mounted read-only) and source it in a run step.
 
-### Flag mapping
+**No distrobox-export yet.** v1.0 focuses on the box itself. `distrobox-export` integration is a future feature.
 
-The `docker = none | host | nested` spectrum is a **named bundle of flags**, not a free-form field. Each mode maps to exact `distrobox create` flags (socket mounts, packages, `--init`, `--unshare-*`). Mapping lives in `src/dbox/argv.rs` (pure functions) and is tested independently before any spawn.
-
----
-
-## FAQ & Known Limitations
-
-**Q: Does `cbox` work on macOS or Windows?**
-
-A: No. distrobox is Linux-only; so is cbox.
-
-**Q: Is the `none` docker mode a real security sandbox?**
-
-A: No. distrobox runs `--privileged --security-opt label=disable` by default; it shares user, home, network, IPC, PID namespaces. "Decoupled" (`none`) means **no extra host-Docker coupling**, not a security boundary. For true isolation, use a separate Linux VM.
-
-**Q: Can I recreate a box without losing my `$HOME`?**
-
-A: Yes. `cbox apply --recreate` destroys the container but preserves the shared `$HOME` (distrobox's default). Box-local `/usr` changes are lost, but your files in `$HOME` survive.
-
-**Q: Why is there a TUI when the CLI is already clean?**
-
-A: The TUI proves the `core::` seam is genuinely front-end-agnostic. It's the architectural acceptance test. Also, some users prefer interactive terminals over flags.
-
-**Q: Why not async/tokio?**
-
-A: The codebase is deliberately sync. A single background worker thread + channel keeps the TUI render non-blocking without async complexity. And the runner trait is sync by design — sync is simpler to reason about, simpler to test.
-
-**Q: How do I manage secrets in provisioning?**
-
-A: v1.0 does not support secrets. `[[provision]].run` is plain text in the Boxfile (trust boundary = your Boxfile). For sensitive data, store it outside the Boxfile (e.g., in `$HOME`/.env, mounted read-only) and source it in a `run` step.
-
-**Q: Can I export provisioned apps to the host (like distrobox-export)?**
-
-A: Not yet. v1.0 focuses on the box itself. `distrobox-export` integration is a future feature.
-
-**Q: What if I insert a provision step in the middle of my list?**
-
-A: The idempotency key is `(index, content-hash)`. Inserting a step shifts indices downstream → those steps re-run. This is acceptable because provisioning steps should be idempotent (Vagrant-style contract). Content-addressed ordering is deferred.
+**Inserting provision steps shifts indices.** The idempotency key is `(index, content-hash)`. Inserting a step in the middle shifts downstream indices → those steps re-run. This is by design and acceptable because provisioning steps should be idempotent (Vagrant-style contract).
 
 ---
 
 ## Releases & versioning
 
-Pre-built Linux binaries are published to [GitHub Releases](https://github.com/Rynaro/cardboard-box/releases)
-for every version. Four targets are provided:
+Pre-built Linux binaries are published to [GitHub Releases](https://github.com/Rynaro/cardboard-box/releases) for every version. Four targets:
 
 - `x86_64-unknown-linux-gnu` (glibc ≥ 2.28)
 - `x86_64-unknown-linux-musl` (fully static)
 - `aarch64-unknown-linux-gnu` (glibc ≥ 2.28)
 - `aarch64-unknown-linux-musl` (fully static)
 
-Versioning follows [SemVer](https://semver.org/) driven by
-[Conventional Commits](https://www.conventionalcommits.org/).
-See [RELEASING.md](RELEASING.md) for the full versioning policy, commit-type → bump
-mapping, and artifact verification instructions (`sha256sum -c SHA256SUMS`).
-
-The [![CI](https://github.com/Rynaro/cardboard-box/actions/workflows/ci.yml/badge.svg)](https://github.com/Rynaro/cardboard-box/actions/workflows/ci.yml) badge at the top of this file reflects the `fmt · clippy · build · test` gate on `main`. Every published release is produced only after that gate passes on the Release PR — so a green badge means the released binaries came from a verified, passing build.
+Versioning follows [SemVer](https://semver.org/) driven by [Conventional Commits](https://www.conventionalcommits.org/). See [RELEASING.md](RELEASING.md) for the full versioning policy and artifact verification instructions.
 
 ---
 
 ## Contributing
 
-The project is pre-1.0 greenfield. All three phases are committed and stable. Contributions welcome — open issues for bugs or feature ideas.
+All three implementation phases are complete and stable. Contributions welcome—open issues for bugs or feature ideas.
 
 **Development workflow:** Use `make dev-init` && `make check` to run the full test + lint suite locally (in a container). All work is mocked; no real distrobox needed.
 
