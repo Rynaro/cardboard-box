@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/Rynaro/cardboard-box/compare/v0.2.0...v0.2.1) (2026-06-17)
+
+
+### Bug Fixes
+
+* select docker-mode packages by image distro family ([#3](https://github.com/Rynaro/cardboard-box/issues/3)) ([ec47895](https://github.com/Rynaro/cardboard-box/commit/ec47895383153225e707ca0ad9e07d7abb174811))
+
 ## [0.2.0](https://github.com/Rynaro/cardboard-box/compare/v0.1.0...v0.2.0) (2026-06-17)
 
 
