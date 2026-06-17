@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">The Cardboard Box</h1>
-<p align="center"><strong><code>cbox</code></strong> — declarative, cozy management for <code>distrobox</code></p>
+<p align="center"><strong><code>cbox</code></strong> — declarative management for <code>distrobox</code></p>
 
 <p align="center">
   <a href="https://github.com/Rynaro/cardboard-box/actions/workflows/ci.yml"><img src="https://github.com/Rynaro/cardboard-box/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -20,7 +20,7 @@
 
 `distrobox` is wonderful—it lets you run any Linux distro as a lightweight container, keeping your host pristine. But after the thirtieth time you're memorizing flags, hand-mounting sockets, and re-typing the same `distrobox create` incantation, you realize: this should be simpler.
 
-**`cbox` is that simpler.** One friendly CLI. One declarative `Boxfile.toml` (Vagrant for distrobox). A beautiful terminal cockpit if you want it. Your Linux environments, unboxed and cozy.
+**`cbox` is that simpler.** One CLI for the whole box lifecycle. One declarative `Boxfile.toml` (Vagrant for distrobox). A terminal cockpit when you want it. Your Linux environments, unboxed.
 
 ---
 
@@ -72,7 +72,7 @@ That's it. The box is live, provisioned, and ready.
 
 ---
 
-## What makes it cozy
+## What's in the box
 
 ### A just-works CLI
 
@@ -155,7 +155,7 @@ dst = "/home/me/.bashrc"
 
 ### The TUI cockpit
 
-Run `cbox` with no arguments on a TTY and you get a cozy terminal UI. List your boxes, inspect one, create via a wizard, apply provisioning with live progress, edit Boxfiles in your `$EDITOR`, and enter boxes—all with arrow keys and a few key presses.
+Run `cbox` with no arguments on a TTY and you get a full terminal UI. List your boxes, inspect one, create via a wizard, apply provisioning with live progress, edit Boxfiles in your `$EDITOR`, and enter boxes—all with arrow keys and a few key presses.
 
 The TUI reuses the exact same `core::` logic as the CLI. **Zero duplication**, zero drift. Feature-gated by default; build lean with `--no-default-features` if you prefer CLI only.
 
@@ -502,4 +502,4 @@ MIT. See `LICENSE` file.
 
 ---
 
-**Henlavezzo** — June 2026.
+**Rynaro** — June 2026.

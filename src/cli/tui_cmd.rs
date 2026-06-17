@@ -4,7 +4,7 @@
 
 use clap::Args;
 
-/// Launch the cozy terminal cockpit.
+/// Launch the terminal cockpit.
 #[derive(Args, Debug)]
 pub struct TuiArgs {
     // No additional args for v3.0.
