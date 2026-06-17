@@ -1,7 +1,8 @@
 //! `cbox apply <NAME>` — converge an existing box to its Boxfile.
 
+use super::discover_boxfile_in;
 use super::output::OutputCtx;
-use crate::boxfile::validate::is_valid_name;
+use crate::boxfile::{self, validate::is_valid_name};
 use crate::core::state_store::GuestStateStore;
 use crate::core::{self, spec::ApplySpec};
 use crate::dbox::backend::Backend;
@@ -46,31 +47,66 @@ pub fn run(
 ) -> Result<(), CboxError> {
     let backend = Backend::detect(global_backend)?;
 
-    // Resolve the box name
-    let name = args
-        .name
-        .as_ref()
-        .ok_or_else(|| CboxError::usage("NAME is required for `cbox apply`."))?;
+    // Resolution precedence:
+    //   1. --file PATH given → use it (name comes from Boxfile).
+    //   2. NAME given → existing label/XDG path (--file overrides path only).
+    //   3. ./Boxfile.toml exists in cwd → use it (name + path from Boxfile).
+    //   4. → improved usage error.
 
-    if !is_valid_name(name) {
-        return Err(CboxError::usage(format!(
-            "Invalid box name \"{name}\". Names must match ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"
-        )));
-    }
-
-    // Resolve Boxfile path: --file → XDG fallback
-    let boxfile_path = if let Some(ref file) = args.file {
-        file.clone()
-    } else {
+    let (name, boxfile_path) = if let Some(ref file) = args.file {
+        // Priority 1: --file given; resolve name from the Boxfile.
+        let (bf, warnings) = boxfile::parse_file(file)?;
+        for w in &warnings {
+            eprintln!("warn: {w}");
+        }
+        if !is_valid_name(&bf.name) {
+            return Err(CboxError::dataerr(format!(
+                "Boxfile name \"{}\" is invalid.",
+                bf.name
+            )));
+        }
+        (bf.name, file.clone())
+    } else if let Some(ref name) = args.name {
+        // Priority 2: positional NAME given — XDG resolution.
+        if !is_valid_name(name) {
+            return Err(CboxError::usage(format!(
+                "Invalid box name \"{name}\". Names must match ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"
+            )));
+        }
         let config_home = std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| {
             let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
             format!("{home}/.config")
         });
-        format!("{config_home}/cbox/boxes/{name}/Boxfile.toml")
+        let path = format!("{config_home}/cbox/boxes/{name}/Boxfile.toml");
+        (name.clone(), path)
+    } else if let Some(cwd_path) = std::env::current_dir()
+        .ok()
+        .as_deref()
+        .and_then(discover_boxfile_in)
+    {
+        // Priority 3: Boxfile.toml found in the current working directory.
+        if !ctx.quiet {
+            ctx.hint(&format!("Using ./{cwd_path}"));
+        }
+        let (bf, warnings) = boxfile::parse_file(cwd_path)?;
+        for w in &warnings {
+            eprintln!("warn: {w}");
+        }
+        if !is_valid_name(&bf.name) {
+            return Err(CboxError::dataerr(format!(
+                "Boxfile name \"{}\" is invalid.",
+                bf.name
+            )));
+        }
+        (bf.name, cwd_path.to_string())
+    } else {
+        return Err(CboxError::usage(
+            "NAME is required unless --file is provided or a Boxfile.toml exists in the current directory.",
+        ));
     };
 
     let spec = ApplySpec {
-        name: name.clone(),
+        name,
         boxfile_path,
         force: args.force,
         redo: args.redo.clone(),
