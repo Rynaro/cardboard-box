@@ -2,17 +2,22 @@
 
 **A cozy distrobox manager** — Vagrant-inspired declarative box provisioning, a beautiful terminal cockpit, and a clean CLI for everyone.
 
-`cbox` raises `distrobox` from an advanced-user tool to "just works": single static binary, zero external scripting, and a docker-access spectrum from fully-decoupled to host-Docker-visible to isolated-nested. **v1.0 is feature-complete.** All three phases committed: CLI lifecycle, Boxfile-driven provisioning, and a TUI that dogfoots the same mechanisms.
+`cbox` raises `distrobox` from an advanced-user tool to "just works": single static binary, zero external scripting, and a docker-access spectrum from fully-decoupled to host-Docker-visible to isolated-nested. All three implementation phases are complete: CLI lifecycle, Boxfile-driven provisioning, and a TUI that dogfoots the same mechanisms.
 
 ---
 
 ## Status
 
-**v1.0 → v3.0 complete.** Three phases, 129 tests, all green on `G-NO-NET` (zero real distrobox in CI).
+**Package version: `0.1.0` (pre-1.0, actively developed).** All three implementation phases are complete and 129 tests pass on `G-NO-NET` (zero real distrobox in CI).
 
-- **Phase 1 (v1.0):** CLI lifecycle — `create`, `list`, `rm`/`destroy`, `enter`/`use`, `inspect`/`show`, `edit`, `doctor`. Boxfile schema & the docker-mode spectrum.
-- **Phase 2 (v2.0):** Provisioning engine — `apply` & `up` with idempotent per-step execution, Boxfile↔live diffing, incremental convergence.
-- **Phase 3 (v3.0):** TUI — `cbox` (no args) or `cbox tui` launches a cozy terminal cockpit (list, inspect, create wizard, apply progress, Boxfile editor).
+> Note: the "Phase 1 / Phase 2 / Phase 3" labels below are internal spec-phase numbers,
+> not the package version. The package version is `0.1.0` and follows
+> [SemVer](https://semver.org/) via [Conventional Commits](https://www.conventionalcommits.org/).
+> See [RELEASING.md](RELEASING.md) for the versioning policy.
+
+- **Phase 1:** CLI lifecycle — `create`, `list`, `rm`/`destroy`, `enter`/`use`, `inspect`/`show`, `edit`, `doctor`. Boxfile schema & the docker-mode spectrum.
+- **Phase 2:** Provisioning engine — `apply` & `up` with idempotent per-step execution, Boxfile↔live diffing, incremental convergence.
+- **Phase 3:** TUI — `cbox` (no args) or `cbox tui` launches a cozy terminal cockpit (list, inspect, create wizard, apply progress, Boxfile editor).
 
 **Honest notes:**
 - `cbox` wraps the real `distrobox` CLI by spawning it — it does not reimplement distrobox.
@@ -545,11 +550,30 @@ A: The idempotency key is `(index, content-hash)`. Inserting a step shifts indic
 
 ---
 
+## Releases & versioning
+
+Pre-built Linux binaries are published to [GitHub Releases](https://github.com/Rynaro/cardboard-box/releases)
+for every version. Four targets are provided:
+
+- `x86_64-unknown-linux-gnu` (glibc ≥ 2.28)
+- `x86_64-unknown-linux-musl` (fully static)
+- `aarch64-unknown-linux-gnu` (glibc ≥ 2.28)
+- `aarch64-unknown-linux-musl` (fully static)
+
+Versioning follows [SemVer](https://semver.org/) driven by
+[Conventional Commits](https://www.conventionalcommits.org/).
+See [RELEASING.md](RELEASING.md) for the full versioning policy, commit-type → bump
+mapping, and artifact verification instructions (`sha256sum -c SHA256SUMS`).
+
+---
+
 ## Contributing
 
 The project is pre-1.0 greenfield. All three phases are committed and stable. Contributions welcome — open issues for bugs or feature ideas.
 
 **Development workflow:** Use `make dev-init` && `make check` to run the full test + lint suite locally (in a container). All work is mocked; no real distrobox needed.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution guide including the required Conventional Commits PR-title format.
 
 ---
 

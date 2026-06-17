@@ -1,0 +1,150 @@
+name: Release
+
+# WHY THIS IS ONE WORKFLOW FILE (not two):
+#
+# A GitHub Release created by GITHUB_TOKEN does NOT emit events that trigger
+# other workflows — GitHub blocks it to prevent infinite loops. The naive pattern
+# of a release-please workflow + a separate "on: release: published" build workflow
+# silently never fires the build jobs. The fix is a SINGLE workflow: release-please
+# runs first, then the build jobs are gated on its output within the SAME run.
+# Do NOT split this into two files without adding a PAT or GitHub App token.
+# See RELEASING.md §"Why one workflow file" for the full explanation.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false  # never cancel a release mid-flight
+
+jobs:
+
+  # ─── Stage 1: release-please ─────────────────────────────────────────────
+  # Opens / updates the Release PR on every main push.
+  # On Release PR merge: creates the Git tag + GitHub Release and sets
+  # release_created='true', which gates the build and publish jobs below.
+  release-please:
+    name: release-please
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      # release_created is the canonical output for googleapis/release-please-action@v4
+      # in manifest mode (single-package repo). Also aliased as releases_created (plural).
+      # We gate on release_created; both are emitted by @v4.
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name:        ${{ steps.rp.outputs.tag_name }}
+      version:         ${{ steps.rp.outputs.version }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: rp
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          # token defaults to secrets.GITHUB_TOKEN — correct for the single-workflow pattern
+
+  # ─── Stage 2: cross-build (matrix × 4 targets) ───────────────────────────
+  # Runs ONLY when release-please cut a GitHub Release (Release PR was merged).
+  # Uses cargo-zigbuild on a single ubuntu-latest x86_64 runner — zig provides the
+  # cross-linker for all 4 targets including aarch64. No ARM runner needed.
+  # glibc is pinned to 2.28 via zigbuild's target.GLIBC syntax for the gnu targets,
+  # ensuring binaries run on Debian 10 / RHEL 8 / Ubuntu 18.04 and newer.
+  build:
+    name: build ${{ matrix.target }}
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            zigbuild_target: x86_64-unknown-linux-gnu.2.28
+          - target: x86_64-unknown-linux-musl
+            zigbuild_target: x86_64-unknown-linux-musl
+          - target: aarch64-unknown-linux-gnu
+            zigbuild_target: aarch64-unknown-linux-gnu.2.28
+          - target: aarch64-unknown-linux-musl
+            zigbuild_target: aarch64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Build the exact tagged tree — binary embeds the released version, not a later commit
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Install Rust stable + cross target
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add ${{ matrix.target }}
+
+      - name: Install zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.14.0
+
+      - name: Install cargo-zigbuild
+        # taiki-e/install-action downloads a prebuilt binary — much faster than cargo install
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+
+      - name: Build (tui feature on by default — no --features flag needed)
+        run: cargo zigbuild --release --target ${{ matrix.zigbuild_target }}
+
+      - name: Stage tarball
+        run: |
+          V="${{ needs.release-please.outputs.version }}"
+          T="${{ matrix.target }}"
+          BIN="target/${T}/release/cbox"
+          DIR="cbox-${V}-${T}"
+          mkdir "$DIR"
+          cp "$BIN" README.md LICENSE "$DIR"/
+          tar -czf "${DIR}.tar.gz" "$DIR"
+          # Bare filename in the .sha256 fragment so SHA256SUMS works with sha256sum -c
+          sha256sum "${DIR}.tar.gz" > "${DIR}.tar.gz.sha256"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: |
+            cbox-*.tar.gz
+            cbox-*.tar.gz.sha256
+
+  # ─── Stage 3: assemble SHA256SUMS + upload to GitHub Release ─────────────
+  publish:
+    name: publish assets + SHA256SUMS
+    needs: [release-please, build]
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          merge-multiple: true
+          path: dist
+
+      - name: Assemble SHA256SUMS
+        # Concatenate the per-target .sha256 fragments into one file.
+        # The fragments already contain bare filenames (no path prefix), so
+        # sha256sum -c SHA256SUMS works when run from the directory holding the tarballs.
+        run: cat dist/*.tar.gz.sha256 > dist/SHA256SUMS
+
+      - name: Upload tarballs + SHA256SUMS to GitHub Release
+        # --clobber makes re-runs idempotent (overwrites existing assets instead of erroring)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ needs.release-please.outputs.tag_name }}" \
+            dist/*.tar.gz dist/SHA256SUMS --clobber \
+            --repo "${{ github.repository }}"

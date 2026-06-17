@@ -1,0 +1,42 @@
+name: PR Title (Conventional Commits)
+
+# Validates that the PR title follows the Conventional Commits specification.
+# This matters because the repo uses squash-merge: the PR title becomes the
+# commit subject on main, and release-please reads those subjects to determine
+# the next SemVer bump and CHANGELOG entries.
+#
+# Allowed types: feat, fix, perf, docs, chore, ci, build, refactor, test, style, revert
+# See RELEASING.md for the full Conventional Commits → SemVer mapping.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  validate-pr-title:
+    name: validate PR title (Conventional Commits)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Types recognised by release-please for cbox.
+          # Adding "revert" so reverting a commit is also valid.
+          types: |
+            feat
+            fix
+            perf
+            docs
+            chore
+            ci
+            build
+            refactor
+            test
+            style
+            revert
+          # Allow breaking-change indicator (feat!, fix!) and scope (feat(tui): ...)
+          requireScope: false
