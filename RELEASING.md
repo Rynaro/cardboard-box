@@ -8,22 +8,31 @@ All releases are automated via `release-please` and triggered by landing
 
 ## Prerequisites (one-time repo settings)
 
-Before the first release the maintainer must toggle two GitHub settings:
+These are already configured on `Rynaro/cardboard-box`; documented here for
+forks and for the record.
 
 1. **Settings → Actions → General → Workflow permissions**
    - Enable **"Allow GitHub Actions to create and approve pull requests."**
      Without this, `release-please` cannot open the Release PR and the whole
      pipeline is silently blocked. This is the most common first-run failure.
-   - Confirm **"Read and write permissions"** is selected for the default
-     `GITHUB_TOKEN` (or rely on the per-job `permissions:` blocks in the
-     workflow, which are already set).
 
-2. **Branch protection on `main`** (if enabled): allow the `release-please`
-   bot to push the version-bump + CHANGELOG commit that closes the Release PR.
-   The maintainer still reviews and merges the Release PR manually — that is the
-   intended human gate. Only the final merge-commit push needs to be unblocked.
+2. **`CARDBOX_RELEASE_TOKEN` secret (a PAT).** `release-please` authenticates
+   with a Personal Access Token instead of the default `GITHUB_TOKEN`. This is
+   what makes the **Release PR trigger CI**: GitHub never runs workflows on PRs
+   opened by `GITHUB_TOKEN`, so without a PAT the Release PR would have no checks
+   and could not satisfy branch protection. Create it as:
+   - **Fine-grained PAT**, repository access limited to this repo, permissions
+     **Contents: Read and write** + **Pull requests: Read and write**.
+     (A classic PAT with the `repo` scope also works but is broader.)
+   - Add it under **Settings → Secrets and variables → Actions → New repository
+     secret**, name **`CARDBOX_RELEASE_TOKEN`**.
+   - Rotate before its expiry; the release pipeline fails closed if it lapses.
 
-No PAT, no GitHub App, and no external secrets are required.
+3. **Branch protection on `main`.** Requires the `fmt · clippy · build · test`
+   CI check. Because the Release PR now runs CI (via the PAT), it is gated the
+   same as any other PR. `enforce_admins` is **off** so the maintainer can still
+   merge if needed; the maintainer reviews and merges the Release PR manually —
+   that is the intended human gate.
 
 ---
 
@@ -205,16 +214,19 @@ own the version field.
 The release pipeline lives entirely in `.github/workflows/release.yml` rather
 than being split into a `release-please.yml` + a separate `build.yml`.
 
-This is intentional. A GitHub Release (or tag) created by the default
-`GITHUB_TOKEN` does **not** emit events that trigger other workflows — GitHub
-blocks this to prevent infinite loops. The naive two-file pattern silently never
-fires the build workflow. The fix is a single file where the `build` and
-`publish` jobs are gated on `release-please`'s output within the same run.
+This is intentional. A GitHub Release (or tag) created by `GITHUB_TOKEN` does
+**not** emit events that trigger other workflows — GitHub blocks this to prevent
+infinite loops. The naive two-file pattern (`release-please.yml` + a separate
+`on: release` `build.yml`) silently never fires the build workflow. The fix is a
+single file where the `build` and `publish` jobs are gated on `release-please`'s
+`release_created` output within the same run.
 
-**Do NOT split this into two files** without also introducing a PAT or GitHub
-App token (which adds secret-management overhead and a wider blast radius).
-The single-workflow pattern is the canonical, secret-free solution recommended
-by the `release-please` docs for exactly this case.
+Note this is a *separate* concern from the `CARDBOX_RELEASE_TOKEN` PAT. The PAT
+governs how the **Release PR** is authored (so it runs CI); the single-workflow
+gating governs how the **build** is triggered after the release is cut. We keep
+the single-workflow design even with the PAT — gating on the job output is more
+explicit and robust than relying on a PAT-created release re-triggering a second
+workflow. **Do NOT split this into two files.**
 
 ---
 

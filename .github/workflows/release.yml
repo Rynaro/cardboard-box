@@ -46,7 +46,13 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-          # token defaults to secrets.GITHUB_TOKEN — correct for the single-workflow pattern
+          # PAT (not GITHUB_TOKEN) so the Release PR is authored by a real user and
+          # therefore DOES trigger the CI workflow (GitHub never runs workflows on
+          # PRs opened by GITHUB_TOKEN). This lets the required CI check report on the
+          # Release PR so branch protection gates it like any other PR.
+          # Secret CARDBOX_RELEASE_TOKEN = fine-grained PAT on this repo with
+          # Contents: read/write + Pull requests: read/write. See RELEASING.md.
+          token: ${{ secrets.CARDBOX_RELEASE_TOKEN }}
 
   # ─── Stage 2: cross-build (matrix × 4 targets) ───────────────────────────
   # Runs ONLY when release-please cut a GitHub Release (Release PR was merged).
