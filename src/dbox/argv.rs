@@ -215,7 +215,7 @@ pub fn build_state_write_argv(name: &str, json: &str) -> Vec<String> {
     let escaped = escape_single_quotes(json);
     let state_path = "${XDG_STATE_HOME:-$HOME/.local/state}/cbox/provision.json";
     let state_dir = "${XDG_STATE_HOME:-$HOME/.local/state}/cbox";
-    let cmd = format!("mkdir -p '{state_dir}' && printf '%s' '{escaped}' > '{state_path}'");
+    let cmd = format!("mkdir -p \"{state_dir}\" && printf '%s' '{escaped}' > \"{state_path}\"");
     vec![
         "enter".to_string(),
         "--name".to_string(),
