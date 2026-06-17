@@ -262,6 +262,19 @@ pub struct ProvisionStepResult {
     pub hash: String,
     pub duration_ms: u64,
     pub exit_code: Option<i32>,
+    /// Captured stderr from the step subprocess (non-empty only on failure).
+    /// Excluded from the stable JSON schema to avoid breaking existing consumers.
+    #[serde(skip)]
+    pub captured_stderr: String,
+    /// Captured stdout from the step subprocess (non-empty only on failure,
+    /// used as fallback when stderr is empty).
+    /// Excluded from the stable JSON schema to avoid breaking existing consumers.
+    #[serde(skip)]
+    pub captured_stdout: String,
+    /// The argv that was executed (the distrobox enter … -- sh -c "<run>" vector).
+    /// Excluded from the stable JSON schema.
+    #[serde(skip)]
+    pub argv: Vec<String>,
 }
 
 /// Diff result between Boxfile and live.

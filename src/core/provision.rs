@@ -135,6 +135,9 @@ pub fn provision(
                 hash,
                 duration_ms: 0,
                 exit_code: None,
+                captured_stderr: String::new(),
+                captured_stdout: String::new(),
+                argv: Vec::new(),
             });
             continue;
         }
@@ -145,11 +148,23 @@ pub fn provision(
         let duration_ms = start.elapsed().as_millis() as u64;
 
         if step_result.status == "failed" {
+            let exit_code = step_result.exit_code.unwrap_or(1);
+            let step_type = step_result.step_type.clone();
+            // Choose the best output to surface: stderr preferred, stdout as fallback.
+            let raw_output = if !step_result.captured_stderr.is_empty() {
+                &step_result.captured_stderr
+            } else {
+                &step_result.captured_stdout
+            };
+            let surfaced = tail_lines(raw_output, 40);
+            let step_argv = step_result.argv.clone();
+
             results.push(ProvisionStepResult {
                 duration_ms,
                 ..step_result
             });
-            // Record failure in state
+            // Record failure in state so it re-runs next apply (hash stored with
+            // result="failed"; step_hash() filters on result="ok", so it is not skipped).
             state.set_step(AppliedStep {
                 idx,
                 step_type: step_type_str(&step.step_type),
@@ -158,11 +173,10 @@ pub fn provision(
                 result: "failed".to_string(),
             });
             let _ = store.write(plan.name, state, runner); // best-effort
-                                                           // Return error to signal stop
-            return Err(CboxError::backend_error(
-                results.last().and_then(|r| r.exit_code).unwrap_or(1),
-                &format!("Provision step [{idx}] failed"),
-                &[],
+
+            // Build a rich error: headline + captured output + step argv.
+            return Err(CboxError::provision_step_error(
+                idx, &step_type, exit_code, &surfaced, &step_argv,
             ));
         }
 
@@ -212,6 +226,9 @@ fn run_step(
                     hash: hash.to_string(),
                     duration_ms: 0,
                     exit_code: Some(out.status),
+                    captured_stderr: out.stderr.clone(),
+                    captured_stdout: out.stdout.clone(),
+                    argv: out.argv.clone(),
                 });
             }
 
@@ -222,6 +239,9 @@ fn run_step(
                 hash: hash.to_string(),
                 duration_ms: 0,
                 exit_code: Some(out.status),
+                captured_stderr: String::new(),
+                captured_stdout: String::new(),
+                argv: out.argv.clone(),
             })
         }
         ProvisionType::Copy => {
@@ -247,6 +267,9 @@ fn run_step(
                     hash: hash.to_string(),
                     duration_ms: 0,
                     exit_code: Some(out.status),
+                    captured_stderr: out.stderr.clone(),
+                    captured_stdout: out.stdout.clone(),
+                    argv: out.argv.clone(),
                 });
             }
 
@@ -257,6 +280,9 @@ fn run_step(
                 hash: hash.to_string(),
                 duration_ms: 0,
                 exit_code: Some(out.status),
+                captured_stderr: String::new(),
+                captured_stdout: String::new(),
+                argv: out.argv.clone(),
             })
         }
     }
@@ -267,4 +293,18 @@ fn step_type_str(t: &ProvisionType) -> String {
         ProvisionType::Shell => "shell".to_string(),
         ProvisionType::Copy => "copy".to_string(),
     }
+}
+
+/// Return the last `n` lines of `text`.  If the text was truncated, prepends a
+/// one-line note so the user knows they're seeing a tail, not the full output.
+fn tail_lines(text: &str, n: usize) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.len() <= n {
+        return text.to_string();
+    }
+    let tail = lines[lines.len() - n..].join("\n");
+    format!(
+        "[… {} line(s) truncated; showing last {n} …]\n{tail}",
+        lines.len() - n
+    )
 }

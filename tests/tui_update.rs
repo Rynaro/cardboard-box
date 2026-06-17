@@ -335,6 +335,9 @@ fn ac_apply_2_apply_done_updates_progress() {
         hash: "abc".to_string(),
         duration_ms: 100,
         exit_code: Some(0),
+        captured_stderr: String::new(),
+        captured_stdout: String::new(),
+        argv: Vec::new(),
     }];
 
     let outcome = ApplyOutcome {

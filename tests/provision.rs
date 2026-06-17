@@ -407,6 +407,160 @@ fn ac_prov_8_corrupt_state() {
     );
 }
 
+// ─── AC-PROV-9: failure error contains captured stderr + step index + exit code ──
+
+#[test]
+fn ac_prov_9_failure_error_surfaces_stderr_and_index() {
+    let runner = MockRunner::new()
+        .with_matcher(
+            MockMatcher::new(MockResponse::err(2, "bundle: Could not find gem 'psepho'"))
+                .with_program("distrobox")
+                .with_args_contain(vec!["bundle install".to_string()]),
+        )
+        .with_default(MockResponse::ok(""));
+
+    let store = MemoryStateStore::empty();
+    let steps = vec![shell_step("bundle install")];
+
+    let plan = ProvisionPlan {
+        name: "electionbuddy",
+        steps: &steps,
+        boxfile_dir: Path::new("."),
+        backend: &Backend::Podman,
+        force: false,
+        redo: &[],
+        dry_run: false,
+    };
+
+    let mut state = ProvisionState::new();
+    let err = provision(&plan, &store, &runner, &mut state).unwrap_err();
+
+    // Exit code must be 125 (BACKEND_NONZERO)
+    assert_eq!(err.exit_code(), 125, "provision failure -> exit 125");
+
+    let msg = err.to_string();
+    // Headline must contain step index
+    assert!(
+        msg.contains("[0]"),
+        "error should name step index [0], got: {msg}"
+    );
+    // Headline must contain exit code
+    assert!(
+        msg.contains("exit 2"),
+        "error should include exit code 2, got: {msg}"
+    );
+    // Error message must surface the captured stderr
+    assert!(
+        msg.contains("psepho"),
+        "error should include captured stderr 'psepho', got: {msg}"
+    );
+}
+
+// ─── AC-PROV-10: step recorded as "failed" re-runs on the next apply ──────────
+
+#[test]
+fn ac_prov_10_failed_step_reruns_not_skipped() {
+    use cbox::core::provision::hash_step;
+    use cbox::core::state_store::AppliedStep;
+
+    // Compute the hash for the step
+    let step = shell_step("bundle install");
+    let h = hash_step(&step, Path::new(".")).unwrap();
+
+    // Pre-load state that records step 0 as "failed" (with the same hash)
+    // This simulates a previous run that failed at step 0.
+    let mut initial_state = ProvisionState::new();
+    initial_state.set_step(AppliedStep {
+        idx: 0,
+        step_type: "shell".to_string(),
+        hash: h,
+        applied_at: 0,
+        result: "failed".to_string(),
+    });
+
+    let store = MemoryStateStore::with_state(initial_state);
+
+    // This time the step succeeds
+    let runner = MockRunner::new().with_default(MockResponse::ok("Bundle complete!"));
+
+    let steps = vec![step];
+    let plan = ProvisionPlan {
+        name: "electionbuddy",
+        steps: &steps,
+        boxfile_dir: Path::new("."),
+        backend: &Backend::Podman,
+        force: false,
+        redo: &[],
+        dry_run: false,
+    };
+
+    let mut state = store.read("electionbuddy", &runner).unwrap();
+    let results = provision(&plan, &store, &runner, &mut state).unwrap();
+
+    // Must NOT be skipped — must re-run despite hash match
+    assert_eq!(
+        results[0].status, "ran",
+        "a step recorded as 'failed' must re-run on next apply, not be skipped"
+    );
+
+    // Runner must have been called (the step actually executed)
+    assert!(
+        runner.call_count() > 0,
+        "runner should have been called for the re-run"
+    );
+
+    // After success the state should record "ok"
+    let written = store.last_written_state().expect("state should be written");
+    let recorded = written.steps.iter().find(|s| s.idx == 0).unwrap();
+    assert_eq!(
+        recorded.result, "ok",
+        "after success the state result should be 'ok'"
+    );
+}
+
+// ─── AC-PROV-11: step recorded as "ok" with matching hash IS skipped ──────────
+
+#[test]
+fn ac_prov_11_ok_step_with_matching_hash_is_skipped() {
+    use cbox::core::provision::hash_step;
+    use cbox::core::state_store::AppliedStep;
+
+    let step = shell_step("echo hello");
+    let h = hash_step(&step, Path::new(".")).unwrap();
+
+    let mut initial_state = ProvisionState::new();
+    initial_state.set_step(AppliedStep {
+        idx: 0,
+        step_type: "shell".to_string(),
+        hash: h,
+        applied_at: 0,
+        result: "ok".to_string(),
+    });
+
+    let store = MemoryStateStore::with_state(initial_state);
+    let runner = MockRunner::new().with_default(MockResponse::ok(""));
+
+    let steps = vec![step];
+    let plan = ProvisionPlan {
+        name: "web-dev",
+        steps: &steps,
+        boxfile_dir: Path::new("."),
+        backend: &Backend::Podman,
+        force: false,
+        redo: &[],
+        dry_run: false,
+    };
+
+    let mut state = store.read("web-dev", &runner).unwrap();
+    let results = provision(&plan, &store, &runner, &mut state).unwrap();
+
+    assert_eq!(
+        results[0].status, "skipped",
+        "step with result='ok' and matching hash must be skipped"
+    );
+    assert_eq!(runner.call_count(), 0, "no runner calls for a skipped step");
+}
+
 // ─── Idempotency proof (G-IDEMPOTENT) ────────────────────────────────────────
 
 #[test]

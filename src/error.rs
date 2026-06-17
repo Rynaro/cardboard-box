@@ -103,6 +103,34 @@ impl CboxError {
         CboxError::BoxNotFound { name: name.into() }
     }
 
+    /// Build a Backend error for a failed provision step.
+    ///
+    /// Unlike `backend_error`, this bypasses distrobox-signal pattern matching and
+    /// surfaces the step's own output directly.
+    ///
+    /// * `idx`       — 0-based step index
+    /// * `step_type` — "shell" or "copy"
+    /// * `code`      — non-zero exit code from the subprocess
+    /// * `output`    — captured stderr (or stdout if stderr is empty), already
+    ///   tail-truncated to a sane size
+    /// * `argv`      — the full argv that was executed
+    pub fn provision_step_error(
+        idx: usize,
+        step_type: &str,
+        code: i32,
+        output: &str,
+        argv: &[String],
+    ) -> Self {
+        let argv_str = argv.join(" ");
+        let headline = format!("Provision step [{idx}] ({step_type}) failed (exit {code})");
+        CboxError::Backend {
+            code,
+            headline,
+            stderr_tail: output.to_string(),
+            argv: argv_str,
+        }
+    }
+
     /// Build a Backend error with cozy pattern-matching on distrobox stderr signals (§4.3).
     pub fn backend_error(code: i32, stderr: &str, argv: &[String]) -> Self {
         let argv_str = argv.join(" ");

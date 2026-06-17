@@ -145,7 +145,13 @@ pub fn run(
     };
 
     let store = GuestStateStore;
-    let outcome = core::up(&up_spec, &store, runner)?;
+    // Capture name + boxfile_path before moving into the outcome for hint purposes.
+    let box_name = up_spec.create_spec.name.clone();
+    let boxfile_path_for_hint = up_spec.create_spec.boxfile_path.clone().unwrap_or_default();
+
+    let outcome = core::up(&up_spec, &store, runner).inspect_err(|e| {
+        emit_provision_failure_hint(e, &box_name, &boxfile_path_for_hint, ctx);
+    })?;
 
     if ctx.json {
         let v = serde_json::to_value(&outcome)
@@ -162,6 +168,31 @@ pub fn run(
     }
 
     Ok(())
+}
+
+/// Emit a Vagrant-style debug/resume hint to stderr when a provision step fails.
+/// Only emits in human mode (not --json, not --quiet).
+fn emit_provision_failure_hint(
+    err: &crate::error::CboxError,
+    name: &str,
+    boxfile_path: &str,
+    ctx: &OutputCtx,
+) {
+    if ctx.json || ctx.quiet {
+        return;
+    }
+    if err.exit_code() != crate::error::exit::BACKEND_NONZERO {
+        return;
+    }
+    eprintln!();
+    eprintln!("hint: The box is still up.");
+    eprintln!("hint: Enter it to debug:  cbox enter {name}");
+    if !boxfile_path.is_empty() {
+        eprintln!("hint: After fixing, resume with:  cbox apply --file {boxfile_path}");
+    } else {
+        eprintln!("hint: After fixing, resume with:  cbox up --file <Boxfile.toml>");
+    }
+    eprintln!("hint: Completed steps are skipped; the failed step will re-run.");
 }
 
 fn render_apply_outcome(outcome: &crate::core::spec::ApplyOutcome, ctx: &OutputCtx) {

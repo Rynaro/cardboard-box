@@ -118,7 +118,9 @@ pub fn run(
     };
 
     let store = GuestStateStore;
-    let outcome = core::apply(&spec, &store, runner)?;
+    let outcome = core::apply(&spec, &store, runner).inspect_err(|e| {
+        emit_provision_failure_hint(e, &spec.name, &spec.boxfile_path, ctx);
+    })?;
 
     if ctx.json {
         let v = serde_json::to_value(&outcome)
@@ -129,6 +131,28 @@ pub fn run(
     }
 
     Ok(())
+}
+
+/// Emit a Vagrant-style debug/resume hint to stderr when a provision step fails.
+/// Only emits in human mode (not --json, not --quiet).
+/// The error is inspected by exit code: 125 (BACKEND_NONZERO) is the provision-failure code.
+fn emit_provision_failure_hint(
+    err: &crate::error::CboxError,
+    name: &str,
+    boxfile_path: &str,
+    ctx: &OutputCtx,
+) {
+    if ctx.json || ctx.quiet {
+        return;
+    }
+    if err.exit_code() != crate::error::exit::BACKEND_NONZERO {
+        return;
+    }
+    eprintln!();
+    eprintln!("hint: The box is still up.");
+    eprintln!("hint: Enter it to debug:  cbox enter {name}");
+    eprintln!("hint: After fixing, resume with:  cbox apply --file {boxfile_path}");
+    eprintln!("hint: Completed steps are skipped; the failed step will re-run.");
 }
 
 fn render_apply_outcome(outcome: &crate::core::spec::ApplyOutcome, ctx: &OutputCtx) {
