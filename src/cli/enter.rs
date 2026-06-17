@@ -27,6 +27,7 @@ pub struct EnterArgs {
 pub fn run(
     args: &EnterArgs,
     global_json: bool,
+    global_backend: Option<&str>,
     _ctx: &OutputCtx,
     runner: &dyn DistroboxRunner,
 ) -> Result<(), CboxError> {
@@ -44,11 +45,15 @@ pub fn run(
         )));
     }
 
+    // Route to whichever engine actually hosts this box.
+    let backend = core::resolve_backend(&args.name, global_backend, runner)?;
+
     let spec = EnterSpec {
         name: args.name.clone(),
         root: args.root,
         clean_path: args.clean_path,
         cmd: args.cmd.clone(),
+        backend,
     };
 
     let exit_code = core::enter(&spec, runner)?;

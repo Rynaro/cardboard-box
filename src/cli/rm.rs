@@ -1,5 +1,6 @@
 use super::output::OutputCtx;
 use crate::core::{self, spec::RmSpec};
+use crate::dbox::backend::Backend;
 use crate::dbox::runner::DistroboxRunner;
 use crate::error::CboxError;
 use clap::Args;
@@ -26,6 +27,7 @@ pub struct RmArgs {
 pub fn run(
     args: &RmArgs,
     global_yes: bool,
+    global_backend: Option<&str>,
     ctx: &OutputCtx,
     runner: &dyn DistroboxRunner,
 ) -> Result<(), CboxError> {
@@ -61,12 +63,20 @@ pub fn run(
         }
     }
 
+    // Route to the engine hosting the box. For --all (no specific name) fall
+    // back to the preferred usable backend.
+    let backend = match args.names.first() {
+        Some(name) => core::resolve_backend(name, global_backend, runner)?,
+        None => Backend::usable(global_backend)?[0].clone(),
+    };
+
     let spec = RmSpec {
         names: args.names.clone(),
         force: args.force,
         rm_home: args.rm_home,
         all: args.all,
         yes: global_yes,
+        backend,
     };
 
     let outcome = core::rm(&spec, runner)?;

@@ -111,10 +111,16 @@ pub fn render_list_table(boxes: &[crate::core::spec::BoxRow], ctx: &OutputCtx) {
         .max()
         .unwrap_or(5)
         .max(5);
+    let backend_w = boxes
+        .iter()
+        .map(|b| b.backend.len())
+        .max()
+        .unwrap_or(7)
+        .max(7);
 
     let header = format!(
-        "{:<name_w$}  {:<status_w$}  {:<image_w$}  {:<8}  {}",
-        "NAME", "STATUS", "IMAGE", "DOCKER", "CBOX?",
+        "{:<name_w$}  {:<backend_w$}  {:<status_w$}  {:<image_w$}  {:<8}  {}",
+        "NAME", "BACKEND", "STATUS", "IMAGE", "DOCKER", "CBOX?",
     );
 
     if ctx.color() {
@@ -127,8 +133,8 @@ pub fn render_list_table(boxes: &[crate::core::spec::BoxRow], ctx: &OutputCtx) {
     for b in boxes {
         let cbox_mark = if b.cbox_managed { "yes" } else { "no" };
         println!(
-            "{:<name_w$}  {:<status_w$}  {:<image_w$}  {:<8}  {}",
-            b.name, b.status, b.image, b.docker_mode, cbox_mark,
+            "{:<name_w$}  {:<backend_w$}  {:<status_w$}  {:<image_w$}  {:<8}  {}",
+            b.name, b.backend, b.status, b.image, b.docker_mode, cbox_mark,
         );
     }
 }

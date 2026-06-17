@@ -1,6 +1,5 @@
 use super::output::{render_inspect_panel, OutputCtx};
 use crate::core::{self, spec::InspectSpec};
-use crate::dbox::backend::Backend;
 use crate::dbox::runner::DistroboxRunner;
 use crate::error::CboxError;
 use clap::Args;
@@ -22,7 +21,8 @@ pub fn run(
     ctx: &OutputCtx,
     runner: &dyn DistroboxRunner,
 ) -> Result<(), CboxError> {
-    let backend = Backend::detect(global_backend)?;
+    // Route to whichever engine actually hosts this box.
+    let backend = core::resolve_backend(&args.name, global_backend, runner)?;
 
     let spec = InspectSpec {
         name: args.name.clone(),

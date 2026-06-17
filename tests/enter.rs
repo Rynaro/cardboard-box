@@ -1,6 +1,7 @@
 //! Integration tests for cbox enter / use — AC-ENTER-1 through AC-ENTER-4, AC-USE-1.
 
 use cbox::core::{self, spec::EnterSpec};
+use cbox::dbox::backend::Backend;
 use cbox::dbox::mock::MockRunner;
 
 fn make_enter_spec(name: &str) -> EnterSpec {
@@ -9,6 +10,7 @@ fn make_enter_spec(name: &str) -> EnterSpec {
         root: false,
         clean_path: false,
         cmd: vec![],
+        backend: Backend::Podman,
     }
 }
 
@@ -35,6 +37,31 @@ fn ac_enter_1_uses_run_interactive() {
     );
 }
 
+// Routing: enter pins distrobox to the box's backend via DBX_CONTAINER_MANAGER
+// so a docker box is entered through docker even when podman is the default.
+#[test]
+fn enter_pins_backend_env() {
+    let runner = MockRunner::new().with_default_interactive(0);
+    let spec = EnterSpec {
+        name: "dock-box".to_string(),
+        root: false,
+        clean_path: false,
+        cmd: vec![],
+        backend: Backend::Docker,
+    };
+
+    core::enter(&spec, &runner).expect("enter should succeed");
+
+    let call = &runner.calls()[0];
+    assert!(
+        call.env
+            .iter()
+            .any(|(k, v)| k == "DBX_CONTAINER_MANAGER" && v == "docker"),
+        "enter must set DBX_CONTAINER_MANAGER=docker, got env: {:?}",
+        call.env
+    );
+}
+
 // AC-ENTER-2: -- ls -la → args contain --name web-dev -- ls -la (order intact).
 #[test]
 fn ac_enter_2_passthrough_cmd() {
@@ -44,6 +71,7 @@ fn ac_enter_2_passthrough_cmd() {
         root: false,
         clean_path: false,
         cmd: vec!["ls".to_string(), "-la".to_string()],
+        backend: Backend::Podman,
     };
 
     core::enter(&spec, &runner).expect("enter should succeed");

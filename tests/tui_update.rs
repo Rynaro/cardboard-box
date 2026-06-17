@@ -24,6 +24,7 @@ fn make_running_box(name: &str) -> BoxRow {
         docker_mode: "none".to_string(),
         cbox_managed: true,
         id: "abc123".to_string(),
+        backend: "podman".to_string(),
     }
 }
 
@@ -35,6 +36,7 @@ fn make_stopped_box(name: &str) -> BoxRow {
         docker_mode: "none".to_string(),
         cbox_managed: true,
         id: "def456".to_string(),
+        backend: "podman".to_string(),
     }
 }
 
@@ -220,6 +222,7 @@ fn ac_destroy_2_y_emits_rm() {
     model.confirm = Some(cbox::tui::model::ConfirmState {
         name: "web-dev".to_string(),
         rm_home: false,
+        backend: Backend::Podman,
     });
 
     let effects = update(&mut model, key_msg(Key::Char('y')));
@@ -244,6 +247,7 @@ fn ac_destroy_3_n_cancels() {
     model.confirm = Some(cbox::tui::model::ConfirmState {
         name: "web-dev".to_string(),
         rm_home: false,
+        backend: Backend::Podman,
     });
 
     let effects = update(&mut model, key_msg(Key::Char('n')));

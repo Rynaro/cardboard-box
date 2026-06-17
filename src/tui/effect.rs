@@ -50,11 +50,13 @@ pub fn execute_effect(
     eff: Effect,
     store: &dyn ProvisionStateStore,
     runner: &Arc<dyn DistroboxRunner>,
-    backend: &crate::dbox::backend::Backend,
+    backends: &[crate::dbox::backend::Backend],
 ) -> Option<Message> {
     match eff {
         Effect::LoadList => {
-            let result = core::list_machine(backend, runner.as_ref()).map(|o| o.boxes);
+            // Merge boxes from every usable backend so the list never hides a box
+            // that lives on the other engine.
+            let result = core::list_all(backends, runner.as_ref()).map(|o| o.boxes);
             Some(Message::ListLoaded(result))
         }
 
