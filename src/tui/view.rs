@@ -61,6 +61,7 @@ mod inner {
 
         let header = Row::new(vec![
             Cell::from("NAME").style(Style::default().add_modifier(Modifier::BOLD)),
+            Cell::from("BACKEND").style(Style::default().add_modifier(Modifier::BOLD)),
             Cell::from("STATUS").style(Style::default().add_modifier(Modifier::BOLD)),
             Cell::from("IMAGE").style(Style::default().add_modifier(Modifier::BOLD)),
             Cell::from("DOCKER").style(Style::default().add_modifier(Modifier::BOLD)),
@@ -95,6 +96,7 @@ mod inner {
 
                 Row::new(vec![
                     Cell::from(b.name.clone()),
+                    Cell::from(b.backend.clone()),
                     Cell::from(b.status.clone()).style(if is_selected {
                         style
                     } else {
@@ -110,8 +112,9 @@ mod inner {
 
         let widths = [
             Constraint::Percentage(20),
-            Constraint::Percentage(15),
-            Constraint::Percentage(45),
+            Constraint::Percentage(10),
+            Constraint::Percentage(13),
+            Constraint::Percentage(37),
             Constraint::Percentage(10),
             Constraint::Percentage(10),
         ];

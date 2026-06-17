@@ -45,7 +45,7 @@ fn ac_eff_list_loads_boxes() {
     let runner = MockRunner::new().with_default(MockResponse::ok(json));
     let arc_runner = make_runner(runner);
 
-    let msg = execute_effect(Effect::LoadList, &store(), &arc_runner, &Backend::Podman)
+    let msg = execute_effect(Effect::LoadList, &store(), &arc_runner, &[Backend::Podman])
         .expect("should return a message");
 
     match msg {
@@ -74,7 +74,7 @@ fn ac_eff_list_call_shape() {
     let raw = MockRunner::new().with_default(MockResponse::ok("[]"));
     let runner: Arc<dyn cbox::dbox::runner::DistroboxRunner> = Arc::new(raw);
 
-    execute_effect(Effect::LoadList, &store(), &runner, &Backend::Podman);
+    execute_effect(Effect::LoadList, &store(), &runner, &[Backend::Podman]);
 
     // We can't downcast Arc<dyn Trait> back to MockRunner in safe Rust.
     // The alternative: drive the core function directly and assert on the mock.
@@ -114,7 +114,7 @@ fn ac_eff_create_calls_distrobox_create() {
         Effect::Create(spec),
         &store(),
         &arc_runner,
-        &Backend::Podman,
+        &[Backend::Podman],
     )
     .expect("should produce a message");
 
@@ -156,6 +156,7 @@ fn ac_eff_enter_is_interactive() {
         root: false,
         clean_path: false,
         cmd: vec![],
+        backend: Backend::Podman,
     };
 
     let code = cbox::core::enter(&spec, &runner).expect("enter should succeed");
@@ -185,12 +186,13 @@ fn ac_eff_suspend_enter_returns_none() {
         root: false,
         clean_path: false,
         cmd: vec![],
+        backend: Backend::Podman,
     };
     let result = execute_effect(
         Effect::SuspendAndEnter(spec),
         &store(),
         &runner,
-        &Backend::Podman,
+        &[Backend::Podman],
     );
     assert!(
         result.is_none(),
@@ -211,9 +213,10 @@ fn ac_eff_rm_calls_distrobox_rm() {
         rm_home: false,
         all: false,
         yes: true,
+        backend: Backend::Podman,
     };
 
-    let msg = execute_effect(Effect::Rm(spec), &store(), &arc_runner, &Backend::Podman)
+    let msg = execute_effect(Effect::Rm(spec), &store(), &arc_runner, &[Backend::Podman])
         .expect("should produce a message");
 
     assert!(
@@ -229,6 +232,7 @@ fn ac_eff_rm_calls_distrobox_rm() {
         rm_home: false,
         all: false,
         yes: true,
+        backend: Backend::Podman,
     };
     let _ = cbox::core::rm(&spec2, &raw2);
     let calls = raw2.calls();
@@ -298,8 +302,13 @@ packages = []
         backend: Backend::Podman,
     };
 
-    let msg = execute_effect(Effect::Apply(spec), &store(), &arc_runner, &Backend::Podman)
-        .expect("should produce a message");
+    let msg = execute_effect(
+        Effect::Apply(spec),
+        &store(),
+        &arc_runner,
+        &[Backend::Podman],
+    )
+    .expect("should produce a message");
 
     assert!(
         matches!(msg, Message::ApplyDone(Ok(_))),
@@ -312,7 +321,7 @@ packages = []
 #[test]
 fn quit_effect_returns_none() {
     let runner = make_runner(MockRunner::new());
-    let result = execute_effect(Effect::Quit, &store(), &runner, &Backend::Podman);
+    let result = execute_effect(Effect::Quit, &store(), &runner, &[Backend::Podman]);
     assert!(
         result.is_none(),
         "Quit should return None (handled by event loop)"
@@ -326,7 +335,7 @@ fn suspend_edit_effect_returns_none() {
         Effect::SuspendAndEdit("/tmp/Boxfile.toml".to_string()),
         &store(),
         &runner,
-        &Backend::Podman,
+        &[Backend::Podman],
     );
     assert!(
         result.is_none(),
@@ -369,7 +378,7 @@ fn doctor_effect_returns_doctor_done() {
         Effect::Doctor(spec),
         &store(),
         &arc_runner,
-        &Backend::Podman,
+        &[Backend::Podman],
     )
     .expect("should produce a message");
 

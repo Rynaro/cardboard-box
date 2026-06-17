@@ -68,6 +68,54 @@ impl Backend {
         ))
     }
 
+    /// Every backend usable right now — installed and `info` exit 0 — in
+    /// preference order (podman, then docker). An explicit override (`--backend`)
+    /// short-circuits to just that backend, so it still acts as a filter.
+    ///
+    /// Unlike [`detect`], this intentionally ignores `$CBOX_BACKEND`: that env var
+    /// is the default for *creating* new boxes, not a filter that hides existing
+    /// boxes on the other engine. Listing should surface every box you have.
+    pub fn usable(override_arg: Option<&str>) -> Result<Vec<Backend>, CboxError> {
+        if let Some(b) = override_arg {
+            return Ok(vec![parse_backend(b)?]);
+        }
+        let mut found = Vec::new();
+        if probe_backend("podman") {
+            found.push(Backend::Podman);
+        }
+        if probe_backend("docker") {
+            found.push(Backend::Docker);
+        }
+        if found.is_empty() {
+            return Err(CboxError::tempfail(
+                "No usable container backend found (tried podman, docker). \
+                 Is podman or docker installed and the service running?  cbox doctor",
+            ));
+        }
+        Ok(found)
+    }
+
+    /// Parse a backend name leniently (case-insensitive); `None` if unknown.
+    /// Used to turn a `BoxRow.backend` string back into a `Backend` for routing.
+    // Only exercised by the TUI today; the lean (tui-off) build sees no caller.
+    #[allow(dead_code)]
+    pub fn from_name(s: &str) -> Option<Backend> {
+        match s.to_lowercase().as_str() {
+            "podman" => Some(Backend::Podman),
+            "docker" => Some(Backend::Docker),
+            _ => None,
+        }
+    }
+
+    /// The env var that pins `distrobox` to this backend, so per-box operations
+    /// (enter / rm) target the engine the box actually lives on.
+    pub fn dbx_env(&self) -> (String, String) {
+        (
+            "DBX_CONTAINER_MANAGER".to_string(),
+            self.as_str().to_string(),
+        )
+    }
+
     /// Detect from environment only — used in tests where we can't probe real backends.
     /// Falls back to Podman as a test default.
     #[allow(dead_code)]

@@ -18,10 +18,12 @@ pub fn run(
     ctx: &OutputCtx,
     runner: &dyn DistroboxRunner,
 ) -> Result<(), CboxError> {
-    let backend = Backend::detect(global_backend)?;
+    // Show boxes from every usable backend (podman + docker), not just one.
+    // An explicit --backend still narrows to a single engine.
+    let backends = Backend::usable(global_backend)?;
 
     // Both human and JSON paths use the machine read path for structured data.
-    let outcome = core::list_machine(&backend, runner)?;
+    let outcome = core::list_all(&backends, runner)?;
     let mut boxes = outcome.boxes;
 
     if !args.all {

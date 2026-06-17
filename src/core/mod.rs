@@ -103,6 +103,76 @@ pub fn list_machine(
     })
 }
 
+/// List boxes across every given backend and merge them into one outcome.
+/// Each row is stamped with the backend it came from. A backend that fails to
+/// list (e.g. a daemon that died mid-probe) is skipped, not fatal — but if every
+/// backend fails and nothing is collected, the last error is surfaced.
+pub fn list_all(
+    backends: &[Backend],
+    runner: &dyn DistroboxRunner,
+) -> Result<ListOutcome, CboxError> {
+    let mut boxes = Vec::new();
+    let mut last_err = None;
+    for backend in backends {
+        match list_machine(backend, runner) {
+            Ok(outcome) => boxes.extend(outcome.boxes),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    if boxes.is_empty() {
+        if let Some(e) = last_err {
+            return Err(e);
+        }
+    }
+    Ok(ListOutcome {
+        boxes,
+        raw_human: None,
+    })
+}
+
+/// Resolve which backend a named box lives on, so per-box operations route to
+/// the right engine without the user passing `--backend`.
+///
+/// - explicit `--backend` (in `override_arg`) always wins;
+/// - exactly one usable backend → use it (no lookup needed);
+/// - otherwise probe each backend and match by name;
+/// - found on exactly one → that one;
+/// - found on none → the preferred usable backend (let the op surface its own
+///   "no such box" error);
+/// - found on several → ambiguous, ask the user to disambiguate with `--backend`.
+pub fn resolve_backend(
+    name: &str,
+    override_arg: Option<&str>,
+    runner: &dyn DistroboxRunner,
+) -> Result<Backend, CboxError> {
+    let usable = Backend::usable(override_arg)?;
+    if usable.len() == 1 {
+        return Ok(usable[0].clone());
+    }
+    let matches: Vec<Backend> = usable
+        .iter()
+        .filter(|b| {
+            list_machine(b, runner)
+                .map(|o| o.boxes.iter().any(|row| row.name == name))
+                .unwrap_or(false)
+        })
+        .cloned()
+        .collect();
+    match matches.as_slice() {
+        [one] => Ok(one.clone()),
+        [] => Ok(usable[0].clone()),
+        several => Err(CboxError::usage(format!(
+            "Box \"{name}\" exists on multiple backends ({}). \
+             Disambiguate with --backend.",
+            several
+                .iter()
+                .map(|b| b.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
+
 #[allow(dead_code)]
 pub fn list_human(runner: &dyn DistroboxRunner) -> Result<ListOutcome, CboxError> {
     let args = build_dbox_list_argv();
@@ -123,7 +193,7 @@ pub fn list_human(runner: &dyn DistroboxRunner) -> Result<ListOutcome, CboxError
 /// podman returns a JSON array with object `Labels`; docker returns NDJSON
 /// (one object per line) with `Labels` as a comma-separated string. Field
 /// names differ slightly between the two.
-fn parse_backend_ps_json(json: &str, _backend: &Backend) -> Result<Vec<BoxRow>, CboxError> {
+fn parse_backend_ps_json(json: &str, backend: &Backend) -> Result<Vec<BoxRow>, CboxError> {
     let json = json.trim();
     if json.is_empty() || json == "null" || json == "[]" {
         return Ok(Vec::new());
@@ -163,6 +233,7 @@ fn parse_backend_ps_json(json: &str, _backend: &Backend) -> Result<Vec<BoxRow>, 
             docker_mode,
             cbox_managed,
             id,
+            backend: backend.as_str().to_string(),
         });
     }
 
@@ -231,7 +302,8 @@ pub struct RmOutcome {
 
 pub fn rm(spec: &RmSpec, runner: &dyn DistroboxRunner) -> Result<RmOutcome, CboxError> {
     let args = build_rm_argv(spec);
-    let inv = Invocation::new("distrobox", args, RunMode::Capture);
+    let inv =
+        Invocation::new("distrobox", args, RunMode::Capture).with_env(vec![spec.backend.dbx_env()]);
     let out = runner.run(inv)?;
 
     if out.status != 0 {
@@ -248,7 +320,8 @@ pub fn rm(spec: &RmSpec, runner: &dyn DistroboxRunner) -> Result<RmOutcome, Cbox
 
 pub fn enter(spec: &EnterSpec, runner: &dyn DistroboxRunner) -> Result<i32, CboxError> {
     let args = build_enter_argv(spec);
-    let inv = Invocation::new("distrobox", args, RunMode::Interactive);
+    let inv = Invocation::new("distrobox", args, RunMode::Interactive)
+        .with_env(vec![spec.backend.dbx_env()]);
     let code = runner.run_interactive(inv)?;
     Ok(code)
 }
@@ -723,6 +796,7 @@ pub fn apply(
             rm_home: false,
             all: false,
             yes: true,
+            backend: spec.backend.clone(),
         };
         rm(&rm_spec, runner)?;
 

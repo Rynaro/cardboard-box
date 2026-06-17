@@ -3,7 +3,7 @@
 use cbox::core;
 use cbox::dbox::{
     backend::Backend,
-    mock::{MockResponse, MockRunner},
+    mock::{MockMatcher, MockResponse, MockRunner},
 };
 
 fn two_box_json() -> &'static str {
@@ -83,6 +83,30 @@ fn docker_ndjson_two_boxes() {
     // no cbox.docker_mode label on this one → "unknown", and still managed.
     assert_eq!(second.docker_mode, "unknown");
     assert!(second.cbox_managed);
+}
+
+// Unified view: list_all merges boxes from every backend, and each row is
+// stamped with the engine it came from (podman array + docker NDJSON).
+#[test]
+fn list_all_merges_across_backends() {
+    let podman_json = r#"[
+      {"Id":"p1","Names":["pod-box"],"State":"running","Image":"fedora:40",
+       "Labels":{"manager":"distrobox","cbox.managed":"true"}}
+    ]"#;
+    let docker_ndjson = r#"{"ID":"d1","Names":"dock-box","State":"running","Image":"alpine","Labels":"manager=distrobox,cbox.managed=true"}"#;
+
+    let runner = MockRunner::new()
+        .with_matcher(MockMatcher::new(MockResponse::ok(podman_json)).with_program("podman"))
+        .with_matcher(MockMatcher::new(MockResponse::ok(docker_ndjson)).with_program("docker"));
+
+    let outcome = core::list_all(&[Backend::Podman, Backend::Docker], &runner)
+        .expect("list_all should succeed");
+    assert_eq!(outcome.boxes.len(), 2);
+
+    let pod = outcome.boxes.iter().find(|b| b.name == "pod-box").unwrap();
+    assert_eq!(pod.backend, "podman");
+    let dock = outcome.boxes.iter().find(|b| b.name == "dock-box").unwrap();
+    assert_eq!(dock.backend, "docker");
 }
 
 // AC-LIST-2: human path — table header includes NAME STATUS IMAGE DOCKER CBOX?.

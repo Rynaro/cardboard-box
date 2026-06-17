@@ -12,6 +12,7 @@ pub struct RecordedCall {
     pub program: String,
     pub args: Vec<String>,
     pub interactive: bool,
+    pub env: Vec<(String, String)>,
 }
 
 /// A canned response for `run()`.
@@ -140,6 +141,7 @@ impl MockRunner {
             program: inv.program.clone(),
             args: inv.args.clone(),
             interactive,
+            env: inv.env.clone(),
         });
     }
 

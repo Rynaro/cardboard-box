@@ -94,6 +94,8 @@ impl Default for WizardState {
 pub struct ConfirmState {
     pub name: String,
     pub rm_home: bool,
+    /// Engine the box lives on, so `rm` targets the right backend.
+    pub backend: Backend,
 }
 
 // ─── ProgressState ───────────────────────────────────────────────────────────
@@ -137,7 +139,10 @@ pub struct Model {
     pub confirm: Option<ConfirmState>,
     pub progress: Option<ProgressState>,
     pub status: StatusLine,
+    /// Default backend for *creating* new boxes (the preferred usable engine).
     pub backend: Backend,
+    /// Every usable backend — listing merges boxes across all of these.
+    pub backends: Vec<Backend>,
     pub doctor: Option<DoctorResult>,
     pub should_quit: bool,
     pub busy: bool,
@@ -158,6 +163,7 @@ impl Model {
             confirm: None,
             progress: None,
             status: StatusLine::Idle,
+            backends: vec![backend.clone()],
             backend,
             doctor: None,
             should_quit: false,

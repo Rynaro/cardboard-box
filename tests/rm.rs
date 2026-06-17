@@ -1,6 +1,7 @@
 //! Integration tests for cbox rm / destroy — AC-RM-1 through AC-RM-4.
 
 use cbox::core::{self, spec::RmSpec};
+use cbox::dbox::backend::Backend;
 use cbox::dbox::mock::{MockResponse, MockRunner};
 
 // AC-RM-1: rm with -y → runner called with distrobox rm web-dev, "Removed box" output.
@@ -13,6 +14,7 @@ fn ac_rm_1_basic_rm_yes() {
         rm_home: false,
         all: false,
         yes: true,
+        backend: Backend::Podman,
     };
 
     let outcome = core::rm(&spec, &runner).expect("rm should succeed");
@@ -47,6 +49,7 @@ fn ac_rm_2_rm_is_called_with_spec() {
         rm_home: false,
         all: false,
         yes: false, // no -y, but core::rm doesn't check this — CLI does
+        backend: Backend::Podman,
     };
     let outcome = core::rm(&spec, &runner).expect("core::rm should succeed");
     assert_eq!(outcome.removed, vec!["web-dev"]);
@@ -62,6 +65,7 @@ fn ac_rm_3_force_flag() {
         rm_home: false,
         all: false,
         yes: true,
+        backend: Backend::Podman,
     };
 
     core::rm(&spec, &runner).expect("rm should succeed");
@@ -83,6 +87,7 @@ fn ac_rm_4_multiple_names() {
         rm_home: false,
         all: false,
         yes: true,
+        backend: Backend::Podman,
     };
 
     let outcome = core::rm(&spec, &runner).expect("rm should succeed");

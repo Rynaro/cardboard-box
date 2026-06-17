@@ -8,12 +8,19 @@
 //!  - Key handling is screen-dispatched: match `model.screen` first, then the key.
 
 use crate::core::spec::{ApplySpec, DoctorSpec, EnterSpec, InspectSpec, RmSpec};
+use crate::dbox::backend::Backend;
 use crate::error::CboxError;
 use crate::tui::effect::Effect;
 use crate::tui::message::{Key, Message};
 use crate::tui::model::{
     ConfirmState, Model, ProgressState, Screen, StatusLine, WizardState, WizardStep,
 };
+
+/// Resolve a box's engine from its stored backend string, falling back to the
+/// create default when it's missing/unknown (e.g. mock rows in tests).
+fn backend_of(row_backend: &str, fallback: &Backend) -> Backend {
+    Backend::from_name(row_backend).unwrap_or_else(|| fallback.clone())
+}
 
 /// The pure reducer. Returns a list of effects for the shell to execute.
 pub fn update(model: &mut Model, msg: Message) -> Vec<Effect> {
@@ -92,6 +99,7 @@ fn handle_key_list(model: &mut Model, key: Key) -> Vec<Effect> {
                         root: false,
                         clean_path: false,
                         cmd: vec![],
+                        backend: backend_of(&row.backend, &model.backend),
                     };
                     vec![Effect::SuspendAndEnter(spec)]
                 } else {
@@ -99,7 +107,7 @@ fn handle_key_list(model: &mut Model, key: Key) -> Vec<Effect> {
                     let spec = InspectSpec {
                         name: row.name.clone(),
                         raw: false,
-                        backend: model.backend.clone(),
+                        backend: backend_of(&row.backend, &model.backend),
                     };
                     model.screen = Screen::Detail;
                     model.busy = true;
@@ -115,7 +123,7 @@ fn handle_key_list(model: &mut Model, key: Key) -> Vec<Effect> {
                 let spec = InspectSpec {
                     name: row.name.clone(),
                     raw: false,
-                    backend: model.backend.clone(),
+                    backend: backend_of(&row.backend, &model.backend),
                 };
                 model.screen = Screen::Detail;
                 model.busy = true;
@@ -136,13 +144,15 @@ fn handle_key_list(model: &mut Model, key: Key) -> Vec<Effect> {
                 model.confirm = Some(ConfirmState {
                     name: row.name.clone(),
                     rm_home: false,
+                    backend: backend_of(&row.backend, &model.backend),
                 });
             }
             vec![]
         }
         Key::Char('a') => {
             if let Some(row) = model.selected_box().cloned() {
-                start_apply(model, &row.name, false)
+                let backend = backend_of(&row.backend, &model.backend);
+                start_apply(model, &row.name, false, backend)
             } else {
                 vec![]
             }
@@ -151,7 +161,8 @@ fn handle_key_list(model: &mut Model, key: Key) -> Vec<Effect> {
             // Up is not fully wired in v3.0 list screen (needs boxfile path).
             // Treat as apply for now.
             if let Some(row) = model.selected_box().cloned() {
-                start_apply(model, &row.name, false)
+                let backend = backend_of(&row.backend, &model.backend);
+                start_apply(model, &row.name, false, backend)
             } else {
                 vec![]
             }
@@ -204,7 +215,8 @@ fn handle_key_detail(model: &mut Model, key: Key) -> Vec<Effect> {
         Key::Char('a') => {
             if let Some(ref detail) = model.detail.clone() {
                 let name = detail.name.clone();
-                start_apply(model, &name, false)
+                let backend = backend_of(&detail.backend, &model.backend);
+                start_apply(model, &name, false, backend)
             } else {
                 vec![]
             }
@@ -219,6 +231,7 @@ fn handle_key_detail(model: &mut Model, key: Key) -> Vec<Effect> {
                         root: false,
                         clean_path: false,
                         cmd: vec![],
+                        backend: backend_of(&detail.backend, &model.backend),
                     };
                     vec![Effect::SuspendAndEnter(spec)]
                 } else {
@@ -454,6 +467,7 @@ fn handle_key_confirm(model: &mut Model, key: Key) -> Vec<Effect> {
                     rm_home: confirm.rm_home,
                     all: false,
                     yes: true,
+                    backend: confirm.backend.clone(),
                 };
                 model.screen = Screen::Progress;
                 model.busy = true;
@@ -560,7 +574,7 @@ fn handle_key_doctor(model: &mut Model, key: Key) -> Vec<Effect> {
 
 // ─── Helper: start apply ─────────────────────────────────────────────────────
 
-fn start_apply(model: &mut Model, name: &str, recreate: bool) -> Vec<Effect> {
+fn start_apply(model: &mut Model, name: &str, recreate: bool, backend: Backend) -> Vec<Effect> {
     // Resolve boxfile path (XDG fallback — we don't have a runner here since reducer is pure).
     let config_home = std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
@@ -577,7 +591,7 @@ fn start_apply(model: &mut Model, name: &str, recreate: bool) -> Vec<Effect> {
         recreate,
         yes: true,
         dry_run: false,
-        backend: model.backend.clone(),
+        backend,
     };
 
     model.screen = Screen::Progress;

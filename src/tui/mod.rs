@@ -36,12 +36,11 @@ pub struct TuiConfig {
 #[cfg(feature = "tui")]
 pub fn run(cfg: TuiConfig, runner: Arc<dyn DistroboxRunner>) -> Result<(), CboxError> {
     use crate::dbox::backend::Backend;
-    // Probe for a usable backend (podman → docker), same as the CLI. Using the
-    // real `detect` instead of the test-only `detect_or_default` means a
-    // docker-only host resolves to docker instead of silently defaulting to
-    // podman and listing nothing.
-    let backend = Backend::detect(cfg.backend_override.as_deref())?;
-    app::run(runner, backend)
+    // Probe every usable backend (podman + docker) so the TUI lists boxes across
+    // both engines. An explicit --backend still narrows to one. backends[0] is
+    // the preferred engine, used as the default for creating new boxes.
+    let backends = Backend::usable(cfg.backend_override.as_deref())?;
+    app::run(runner, backends)
 }
 
 /// Stub when built without the `tui` feature — returns a cozy error (exit 70).

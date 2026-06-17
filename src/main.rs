@@ -69,8 +69,10 @@ fn dispatch(
             cli::create::run(args, cli.dry_run, backend_str, ctx, runner_ref)
         }
         Some(Commands::List(args)) => cli::list::run(args, backend_str, ctx, runner_ref),
-        Some(Commands::Rm(args)) => cli::rm::run(args, cli.yes, ctx, runner_ref),
-        Some(Commands::Enter(args)) => cli::enter::run(args, cli.json, ctx, runner_ref),
+        Some(Commands::Rm(args)) => cli::rm::run(args, cli.yes, backend_str, ctx, runner_ref),
+        Some(Commands::Enter(args)) => {
+            cli::enter::run(args, cli.json, backend_str, ctx, runner_ref)
+        }
         Some(Commands::Inspect(args)) => cli::inspect::run(args, backend_str, ctx, runner_ref),
         Some(Commands::Edit(args)) => cli::edit::run(args, cli.json, backend_str, ctx, runner_ref),
         Some(Commands::Doctor(args)) => cli::doctor::run(args, backend_str, ctx, runner_ref),

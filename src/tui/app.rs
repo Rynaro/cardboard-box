@@ -116,14 +116,14 @@ mod inner {
     fn spawn_worker(
         runner: Arc<dyn DistroboxRunner>,
         result_tx: mpsc::SyncSender<Message>,
-        backend: Backend,
+        backends: Vec<Backend>,
     ) -> Worker {
         let (eff_tx, eff_rx) = mpsc::sync_channel::<Effect>(4);
 
         std::thread::spawn(move || {
             let store = make_store();
             for eff in eff_rx {
-                if let Some(msg) = execute_effect(eff, &store, &runner, &backend) {
+                if let Some(msg) = execute_effect(eff, &store, &runner, &backends) {
                     let _ = result_tx.send(msg);
                 }
             }
@@ -229,14 +229,14 @@ mod inner {
         runner: Arc<dyn DistroboxRunner>,
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     ) -> Result<(), CboxError> {
-        let backend = model.backend.clone();
+        let backends = model.backends.clone();
         let runner_for_effects = Arc::clone(&runner);
 
         // Channel for worker → main completions.
         let (result_tx, result_rx) = mpsc::sync_channel::<Message>(32);
         let result_tx_for_worker = result_tx.clone();
 
-        let worker = spawn_worker(runner_for_effects, result_tx_for_worker, backend.clone());
+        let worker = spawn_worker(runner_for_effects, result_tx_for_worker, backends);
 
         // Kick off initial list load.
         model.busy = true;
@@ -317,13 +317,16 @@ mod inner {
 
     // ─── Public entry ─────────────────────────────────────────────────────────
 
-    pub fn run(runner: Arc<dyn DistroboxRunner>, backend: Backend) -> Result<(), CboxError> {
+    pub fn run(runner: Arc<dyn DistroboxRunner>, backends: Vec<Backend>) -> Result<(), CboxError> {
         install_panic_hook();
 
         let (_guard, mut terminal) = TerminalGuard::new()
             .map_err(|e| CboxError::ioerr(format!("Terminal setup failed: {e}")))?;
 
-        let model = Model::new(backend);
+        // backends is non-empty (Backend::usable guarantees it); [0] is the
+        // preferred engine used as the default for creating new boxes.
+        let mut model = Model::new(backends[0].clone());
+        model.backends = backends;
 
         run_loop(model, runner, &mut terminal)
     }

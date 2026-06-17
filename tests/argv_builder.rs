@@ -290,6 +290,7 @@ fn test_build_rm_argv_basic() {
         rm_home: false,
         all: false,
         yes: true,
+        backend: Backend::Podman,
     };
     let args = build_rm_argv(&spec);
     assert_args_contain(&args, &["rm", "web-dev"]);
@@ -307,6 +308,7 @@ fn test_build_rm_argv_force() {
         rm_home: false,
         all: false,
         yes: true,
+        backend: Backend::Podman,
     };
     let args = build_rm_argv(&spec);
     assert_args_contain(&args, &["rm", "--force", "web-dev"]);
@@ -322,6 +324,7 @@ fn test_build_enter_argv_basic() {
         root: false,
         clean_path: false,
         cmd: vec![],
+        backend: Backend::Podman,
     };
     let args = build_enter_argv(&spec);
     assert_args_contain(&args, &["enter", "--name", "web-dev"]);
@@ -338,6 +341,7 @@ fn test_build_enter_argv_with_cmd() {
         root: false,
         clean_path: false,
         cmd: vec!["ls".to_string(), "-la".to_string()],
+        backend: Backend::Podman,
     };
     let args = build_enter_argv(&spec);
     assert_args_contain(&args, &["enter", "--name", "web-dev", "--", "ls", "-la"]);

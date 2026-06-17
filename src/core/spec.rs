@@ -94,6 +94,8 @@ pub struct RmSpec {
     /// Tracks whether -y was passed; not used by core but part of the contract.
     #[allow(dead_code)]
     pub yes: bool,
+    /// Engine the target box(es) live on — pins `distrobox` to the right backend.
+    pub backend: Backend,
 }
 
 /// Spec for `cbox enter`.
@@ -103,6 +105,8 @@ pub struct EnterSpec {
     pub root: bool,
     pub clean_path: bool,
     pub cmd: Vec<String>,
+    /// Engine the box lives on — pins `distrobox` to the right backend.
+    pub backend: Backend,
 }
 
 /// Spec for `cbox inspect`.
@@ -146,6 +150,8 @@ pub struct BoxRow {
     pub docker_mode: String,
     pub cbox_managed: bool,
     pub id: String,
+    /// The container engine this box lives on ("podman" | "docker").
+    pub backend: String,
 }
 
 /// Spec for `cbox edit`.
