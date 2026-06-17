@@ -28,7 +28,7 @@ jobs:
     container: rust:1-slim-bookworm
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install clippy + rustfmt
         run: rustup component add clippy rustfmt

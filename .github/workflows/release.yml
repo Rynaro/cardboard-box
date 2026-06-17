@@ -34,14 +34,14 @@ jobs:
       contents: write
       pull-requests: write
     outputs:
-      # release_created is the canonical output for googleapis/release-please-action@v4
+      # release_created is the canonical output for googleapis/release-please-action@v5
       # in manifest mode (single-package repo). Also aliased as releases_created (plural).
-      # We gate on release_created; both are emitted by @v4.
+      # We gate on release_created; both are emitted by @v5.
       release_created: ${{ steps.rp.outputs.release_created }}
       tag_name:        ${{ steps.rp.outputs.tag_name }}
       version:         ${{ steps.rp.outputs.version }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         id: rp
         with:
           config-file: release-please-config.json
@@ -80,7 +80,7 @@ jobs:
           - target: aarch64-unknown-linux-musl
             zigbuild_target: aarch64-unknown-linux-musl
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # Build the exact tagged tree — binary embeds the released version, not a later commit
           ref: ${{ needs.release-please.outputs.tag_name }}
@@ -117,7 +117,7 @@ jobs:
           sha256sum "${DIR}.tar.gz" > "${DIR}.tar.gz.sha256"
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.target }}
           path: |
@@ -134,7 +134,7 @@ jobs:
       contents: write
     steps:
       - name: Download all dist artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: dist-*
           merge-multiple: true
