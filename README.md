@@ -570,6 +570,8 @@ Versioning follows [SemVer](https://semver.org/) driven by
 See [RELEASING.md](RELEASING.md) for the full versioning policy, commit-type → bump
 mapping, and artifact verification instructions (`sha256sum -c SHA256SUMS`).
 
+The [![CI](https://github.com/Rynaro/cardboard-box/actions/workflows/ci.yml/badge.svg)](https://github.com/Rynaro/cardboard-box/actions/workflows/ci.yml) badge at the top of this file reflects the `fmt · clippy · build · test` gate on `main`. Every published release is produced only after that gate passes on the Release PR — so a green badge means the released binaries came from a verified, passing build.
+
 ---
 
 ## Contributing
