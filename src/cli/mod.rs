@@ -64,11 +64,11 @@ mod tests {
     }
 }
 
-/// cbox — a cozy distrobox manager
+/// cbox — a distrobox manager
 #[derive(Parser, Debug)]
 #[command(
     name = "cbox",
-    about = "A cozy distrobox manager",
+    about = "A distrobox manager",
     version,
     propagate_version = true
 )]
@@ -77,7 +77,7 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
 
-    /// Suppress cozy chrome; errors still print to stderr.
+    /// Suppress decorative output; errors still print to stderr.
     #[arg(short = 'q', long, global = true)]
     pub quiet: bool,
 
@@ -137,6 +137,6 @@ pub enum Commands {
     /// Create-if-absent then apply (the "just works" entry point).
     Up(up::UpArgs),
 
-    /// Launch the cozy terminal cockpit.
+    /// Launch the terminal cockpit.
     Tui(tui_cmd::TuiArgs),
 }

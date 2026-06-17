@@ -46,7 +46,7 @@ mod inner {
 
     fn render_list(model: &Model, frame: &mut Frame, area: ratatui::layout::Rect) {
         let block = Block::default()
-            .title("  cbox — your cozy boxes  ")
+            .title("  cbox — your boxes  ")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Cyan));
 

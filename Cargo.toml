@@ -2,7 +2,7 @@
 name = "cbox"
 version = "0.5.0"
 edition = "2021"
-description = "A cozy distrobox manager"
+description = "A distrobox manager"
 license = "MIT"
 
 [[bin]]
