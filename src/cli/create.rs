@@ -1,3 +1,4 @@
+use super::discover_boxfile_in;
 use super::output::OutputCtx;
 use crate::boxfile::validate::is_valid_name;
 use crate::boxfile::{self, model::DockerModeField};
@@ -73,19 +74,30 @@ pub fn run(
 
     // Start building the spec — may be overridden by Boxfile
     let mut spec = if let Some(ref file_path) = args.file {
+        // Priority 1: --file explicitly given.
         spec_from_boxfile(file_path, &backend)?
-    } else {
-        // Require NAME when no --file
-        let name = args
-            .name
-            .as_ref()
-            .ok_or_else(|| CboxError::usage("NAME is required unless --file is provided."))?;
+    } else if let Some(ref name) = args.name {
+        // Priority 2: positional NAME given.
         if !is_valid_name(name) {
             return Err(CboxError::usage(format!(
                 "Invalid box name \"{name}\". Names must match ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"
             )));
         }
         CreateSpec::new(name.clone(), backend.clone())
+    } else if let Some(cwd_path) = std::env::current_dir()
+        .ok()
+        .as_deref()
+        .and_then(discover_boxfile_in)
+    {
+        // Priority 3: Boxfile.toml found in the current working directory.
+        if !ctx.quiet {
+            ctx.hint(&format!("Using ./{cwd_path}"));
+        }
+        spec_from_boxfile(cwd_path, &backend)?
+    } else {
+        return Err(CboxError::usage(
+            "NAME is required unless --file is provided or a Boxfile.toml exists in the current directory.",
+        ));
     };
 
     // CLI flags override Boxfile

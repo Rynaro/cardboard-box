@@ -1,5 +1,6 @@
 //! `cbox up [NAME]` — create-if-absent then apply.
 
+use super::discover_boxfile_in;
 use super::output::OutputCtx;
 use crate::boxfile::model::DockerModeField;
 use crate::boxfile::{self, validate::is_valid_name};
@@ -88,12 +89,10 @@ pub fn run(
     let backend = Backend::detect(global_backend)?;
 
     let create_spec = if let Some(ref file_path) = args.file {
+        // Priority 1: --file explicitly given.
         spec_from_boxfile(file_path, &backend)?
-    } else {
-        let name = args
-            .name
-            .as_ref()
-            .ok_or_else(|| CboxError::usage("NAME is required unless --file is provided."))?;
+    } else if let Some(ref name) = args.name {
+        // Priority 2: positional NAME given — existing label/XDG behaviour.
         if !is_valid_name(name) {
             return Err(CboxError::usage(format!(
                 "Invalid box name \"{name}\". Names must match ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"
@@ -119,6 +118,20 @@ pub fn run(
             uid: get_uid(),
             dry_run: global_dry_run,
         }
+    } else if let Some(cwd_path) = std::env::current_dir()
+        .ok()
+        .as_deref()
+        .and_then(discover_boxfile_in)
+    {
+        // Priority 3: Boxfile.toml found in the current working directory.
+        if !ctx.quiet {
+            ctx.hint(&format!("Using ./{cwd_path}"));
+        }
+        spec_from_boxfile(cwd_path, &backend)?
+    } else {
+        return Err(CboxError::usage(
+            "NAME is required unless --file is provided or a Boxfile.toml exists in the current directory.",
+        ));
     };
 
     let up_spec = UpSpec {
