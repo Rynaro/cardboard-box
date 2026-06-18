@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/Rynaro/cardboard-box/compare/v0.5.0...v0.5.1) (2026-06-18)
+
+
+### Bug Fixes
+
+* correct boxfile↔live diff (image/home/mounts) and backend resolution ([#17](https://github.com/Rynaro/cardboard-box/issues/17)) ([b93776d](https://github.com/Rynaro/cardboard-box/commit/b93776da338aaf82e5854a3ecc44d4c7aab72b69))
+
 ## [0.5.0](https://github.com/Rynaro/cardboard-box/compare/v0.4.1...v0.5.0) (2026-06-17)
 
 
