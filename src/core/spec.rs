@@ -132,6 +132,15 @@ pub struct InspectResult {
     pub backend: String,
     pub id: String,
     pub boxfile_path: Option<String>,
+    /// The `cbox.image` label written at create time (the Boxfile tag).
+    /// `None` on older boxes that pre-date the label.
+    pub cbox_image: Option<String>,
+    /// The live `$HOME` inside the box, recovered from `Config.Env HOME=…`.
+    /// `None` when the inspect JSON does not carry an Env array (unusual).
+    pub home: Option<String>,
+    /// The live container hostname, from `Config.Hostname`.
+    /// `None` when absent from inspect JSON (unusual).
+    pub hostname: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

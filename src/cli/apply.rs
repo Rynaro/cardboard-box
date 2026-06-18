@@ -5,7 +5,6 @@ use super::output::OutputCtx;
 use crate::boxfile::{self, validate::is_valid_name};
 use crate::core::state_store::GuestStateStore;
 use crate::core::{self, spec::ApplySpec};
-use crate::dbox::backend::Backend;
 use crate::dbox::runner::DistroboxRunner;
 use crate::error::CboxError;
 use clap::Args;
@@ -45,8 +44,6 @@ pub fn run(
     ctx: &OutputCtx,
     runner: &dyn DistroboxRunner,
 ) -> Result<(), CboxError> {
-    let backend = Backend::detect(global_backend)?;
-
     // Resolution precedence:
     //   1. --file PATH given → use it (name comes from Boxfile).
     //   2. NAME given → existing label/XDG path (--file overrides path only).
@@ -104,6 +101,11 @@ pub fn run(
             "NAME is required unless --file is provided or a Boxfile.toml exists in the current directory.",
         ));
     };
+
+    // Route to whichever engine actually hosts this box — mirrors the pattern
+    // used by `enter` so a box on a non-default backend is found without the
+    // user having to pass --backend explicitly.
+    let backend = core::resolve_backend(&name, global_backend, runner)?;
 
     let spec = ApplySpec {
         name,

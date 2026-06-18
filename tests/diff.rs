@@ -29,6 +29,9 @@ fn base_live(name: &str, image: &str) -> InspectResult {
         backend: "podman".to_string(),
         id: "abc123".to_string(),
         boxfile_path: None,
+        cbox_image: None,
+        home: None,
+        hostname: None,
     }
 }
 
