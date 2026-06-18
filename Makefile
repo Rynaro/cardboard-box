@@ -29,10 +29,10 @@ RUN := $(ENGINE) run --rm \
 	-w /work \
 	$(IMAGE)
 
-.PHONY: dev-init image volumes build release dist install test lint lint-lean fmt fmt-check check shell clean nuke
+.PHONY: dev-init image volumes build release dist install test lint lint-lean fmt fmt-check check hooks shell clean nuke
 
-## One-time: build the toolchain image and prepare writable named volumes.
-dev-init: image volumes
+## One-time: build the toolchain image, prepare writable named volumes, and install git hooks.
+dev-init: image volumes hooks
 	@echo "✓ dev environment ready — try: make build"
 
 image:
@@ -88,8 +88,14 @@ fmt-check:
 	$(RUN) cargo fmt --check
 
 ## Everything CI would gate on (G-BUILD/G-UNIT/G-MOCK/G-NO-NET): fmt + clippy
-## (both feature configs) + build + tests.
-check: fmt-check lint lint-lean build test
+## (both feature configs) + debug build + release build + tests.
+check: fmt-check lint lint-lean build release test
+
+## Wire .githooks/ as the repo's git hook directory (idempotent).
+## Bypass any individual hook with `git push --no-verify`.
+hooks:
+	git config core.hooksPath .githooks
+	@echo "✓ git hooks wired — .githooks/pre-push will run make check before every push"
 
 ## Interactive shell in the toolchain container (for poking around).
 shell:

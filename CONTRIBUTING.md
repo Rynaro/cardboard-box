@@ -9,12 +9,23 @@ Thank you for your interest in contributing to `cbox`.
 All builds and tests run inside a container (the clean-host guarantee):
 
 ```bash
-make dev-init   # one-time: build the toolchain image + prepare named volumes
-make check      # full gate: fmt + clippy (both feature configs) + build + test
+make dev-init   # one-time: build the toolchain image + named volumes + install git hooks
+make check      # full gate: fmt + clippy (both feature configs) + build (debug + release) + test
 ```
 
 Never run bare `cargo` on the host. Use `make` targets — see the `Makefile` for
 the full list and `README.md` for detailed documentation.
+
+### Pre-push hook
+
+`make dev-init` installs a pre-push git hook (via `git config core.hooksPath .githooks`)
+that runs `make check` before every push. This catches fmt/clippy/test failures before
+they reach CI.
+
+- If the `cbox-dev` image is not built, the hook tells you to run `make dev-init` rather
+  than producing a cryptic Docker error.
+- To bypass the hook for a single push: `git push --no-verify`.
+- To install (or re-install) the hook without a full `dev-init`: `make hooks`.
 
 ---
 
