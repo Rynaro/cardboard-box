@@ -306,15 +306,45 @@ fn is_distrobox_injected(guest: &str, ctx: &MountFilterCtx) -> bool {
     false
 }
 
+/// Normalize a mount mode string so that the default read-write mode is
+/// represented consistently.
+///
+/// The container runtime (podman/docker) omits an explicit mode string for
+/// ordinary read-write bind-mounts — `Mode` comes back as `""` from
+/// `podman/docker inspect`, even though `RW=true`.  A Boxfile declaring
+/// `mode = "rw"` is semantically identical.  Without normalization the
+/// comparison `"" != "rw"` fires a spurious recreate.
+///
+/// Mapping:
+/// - `""` → `"rw"`  (no explicit mode = default r/w)
+/// - `"rw"` → `"rw"` (explicit r/w = same default)
+/// - `"ro"` → `"ro"` (read-only is the only meaningful non-default)
+/// - anything else is returned trimmed and lowercased as-is.
+fn normalize_mount_mode(mode: &str) -> String {
+    match mode.trim().to_lowercase().as_str() {
+        "" | "rw" => "rw".to_string(),
+        other => other.to_string(),
+    }
+}
+
 fn diff_mounts(
     bf_mounts: &[crate::boxfile::model::MountEntry],
     live_mounts: &[MountResult],
     ctx: &MountFilterCtx,
 ) -> MountDiff {
     // Build canonical "host:guest:mode" tuples for comparison.
+    // normalize_mount_mode ensures "" and "rw" are treated identically —
+    // the runtime omits Mode for default rw mounts, but the Boxfile declares "rw".
     let bf_set: std::collections::BTreeSet<String> = bf_mounts
         .iter()
-        .map(|m| format!("{}:{}:{}", m.host, m.guest, m.mode.as_str()))
+        .map(|m| {
+            format!(
+                "{}:{}:{}",
+                m.host,
+                m.guest,
+                normalize_mount_mode(m.mode.as_str())
+            )
+        })
         .collect();
 
     // Filter the live set: drop mounts that distrobox (or another cbox
@@ -323,7 +353,7 @@ fn diff_mounts(
     let live_set: std::collections::BTreeSet<String> = live_mounts
         .iter()
         .filter(|m| !is_distrobox_injected(&m.guest, ctx))
-        .map(|m| format!("{}:{}:{}", m.host, m.guest, m.mode))
+        .map(|m| format!("{}:{}:{}", m.host, m.guest, normalize_mount_mode(&m.mode)))
         .collect();
 
     if bf_set == live_set {
@@ -914,6 +944,119 @@ mod tests {
             "/run/user/1000 must be excluded (prefix)"
         );
         assert!(is_distrobox_injected("/dev", &ctx), "/dev must be excluded");
+    }
+
+    // ─── Mount-mode normalization (fix: empty mode == "rw") ─────────────────
+
+    // live mode "" vs Boxfile "rw" → no diff (the bug being fixed).
+    #[test]
+    fn mount_mode_empty_live_vs_rw_boxfile_no_diff() {
+        let ctx = make_mount_ctx("/home/user/.cbox-homes/box", "/home/user");
+        // Live runtime returns Mode="" for a default rw bind-mount.
+        let live_mounts = vec![live_mount(
+            "/home/user/workspace/project",
+            "/home/user/workspace/project",
+            "", // empty Mode — the bug scenario
+        )];
+        let bf_mounts = vec![bf_mount(
+            "/home/user/workspace/project",
+            "/home/user/workspace/project",
+            "rw", // Boxfile declares explicit "rw"
+        )];
+        let diff = diff_mounts(&bf_mounts, &live_mounts, &ctx);
+        assert!(
+            diff.is_empty(),
+            "empty live mode must be treated as rw — no diff expected; \
+             got old={:?} new={:?}",
+            diff.old,
+            diff.new
+        );
+    }
+
+    // live "rw" vs Boxfile "rw" → no diff (baseline sanity).
+    #[test]
+    fn mount_mode_rw_vs_rw_no_diff() {
+        let ctx = make_mount_ctx("/home/user/.cbox-homes/box", "/home/user");
+        let live_mounts = vec![live_mount(
+            "/home/user/workspace/project",
+            "/home/user/workspace/project",
+            "rw",
+        )];
+        let bf_mounts = vec![bf_mount(
+            "/home/user/workspace/project",
+            "/home/user/workspace/project",
+            "rw",
+        )];
+        let diff = diff_mounts(&bf_mounts, &live_mounts, &ctx);
+        assert!(
+            diff.is_empty(),
+            "rw vs rw must produce no diff; got old={:?} new={:?}",
+            diff.old,
+            diff.new
+        );
+    }
+
+    // live "" vs Boxfile "ro" → Recreate (genuine ro intent).
+    #[test]
+    fn mount_mode_empty_live_vs_ro_boxfile_triggers_diff() {
+        let ctx = make_mount_ctx("/home/user/.cbox-homes/box", "/home/user");
+        let live_mounts = vec![live_mount(
+            "/home/user/workspace/project",
+            "/home/user/workspace/project",
+            "", // empty = rw by default
+        )];
+        let bf_mounts = vec![bf_mount(
+            "/home/user/workspace/project",
+            "/home/user/workspace/project",
+            "ro", // user now wants read-only
+        )];
+        let diff = diff_mounts(&bf_mounts, &live_mounts, &ctx);
+        assert!(
+            !diff.is_empty(),
+            "empty live mode (=rw) vs ro Boxfile must trigger recreate"
+        );
+    }
+
+    // live "rw" vs Boxfile "ro" → Recreate (genuine ro intent).
+    #[test]
+    fn mount_mode_rw_live_vs_ro_boxfile_triggers_diff() {
+        let ctx = make_mount_ctx("/home/user/.cbox-homes/box", "/home/user");
+        let live_mounts = vec![live_mount(
+            "/home/user/workspace/project",
+            "/home/user/workspace/project",
+            "rw",
+        )];
+        let bf_mounts = vec![bf_mount(
+            "/home/user/workspace/project",
+            "/home/user/workspace/project",
+            "ro",
+        )];
+        let diff = diff_mounts(&bf_mounts, &live_mounts, &ctx);
+        assert!(
+            !diff.is_empty(),
+            "rw live vs ro Boxfile must trigger recreate (genuine mode change)"
+        );
+    }
+
+    // live "ro" vs Boxfile "rw" → Recreate (genuine rw intent from ro live).
+    #[test]
+    fn mount_mode_ro_live_vs_rw_boxfile_triggers_diff() {
+        let ctx = make_mount_ctx("/home/user/.cbox-homes/box", "/home/user");
+        let live_mounts = vec![live_mount(
+            "/home/user/workspace/project",
+            "/home/user/workspace/project",
+            "ro",
+        )];
+        let bf_mounts = vec![bf_mount(
+            "/home/user/workspace/project",
+            "/home/user/workspace/project",
+            "rw",
+        )];
+        let diff = diff_mounts(&bf_mounts, &live_mounts, &ctx);
+        assert!(
+            !diff.is_empty(),
+            "ro live vs rw Boxfile must trigger recreate (genuine mode change)"
+        );
     }
 
     // Full diff_boxfile_vs_live integration: live has injected defaults + one

@@ -488,12 +488,26 @@ fn parse_mounts(item: &serde_json::Value) -> Vec<MountResult> {
             .filter_map(|m| {
                 let host = extract_str(m, &["Source", "source", "host"])?;
                 let guest = extract_str(m, &["Destination", "destination", "guest"])?;
-                let mode = m
+                // podman/docker inspect surfaces `Mode` as "" for default rw
+                // bind-mounts (Mode is empty even though RW=true).  Fall back to
+                // deriving the mode from the `RW` boolean so the projected value
+                // is always explicit ("rw" or "ro") rather than an empty string.
+                let mode_str = m
                     .get("Mode")
                     .or_else(|| m.get("mode"))
                     .and_then(|v| v.as_str())
-                    .unwrap_or("rw")
-                    .to_string();
+                    .unwrap_or("");
+                let mode = if mode_str.is_empty() {
+                    // Derive from RW boolean; default to "rw" when absent.
+                    let rw = m
+                        .get("RW")
+                        .or_else(|| m.get("rw"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+                    if rw { "rw" } else { "ro" }.to_string()
+                } else {
+                    mode_str.to_string()
+                };
                 Some(MountResult { host, guest, mode })
             })
             .collect(),
@@ -1350,6 +1364,50 @@ mod tests {
             result.hostname.as_deref(),
             Some("electionbuddy-box"),
             "hostname must be extracted from Config.Hostname"
+        );
+    }
+
+    /// Confirm that parse_mounts derives mode from the RW boolean when Mode is "".
+    /// This mirrors what podman/docker inspect actually returns for default rw mounts.
+    #[test]
+    fn project_inspect_json_empty_mode_derives_from_rw() {
+        let json = r#"[{
+            "Id": "abc123",
+            "State": {"Status": "running"},
+            "Image": "ubuntu:22.04",
+            "Created": "2024-01-01T00:00:00Z",
+            "Config": {
+                "Labels": {
+                    "cbox.managed": "true",
+                    "cbox.docker_mode": "none"
+                }
+            },
+            "Mounts": [
+                {
+                    "Source": "/home/user/workspace",
+                    "Destination": "/home/user/workspace",
+                    "Mode": "",
+                    "RW": true
+                },
+                {
+                    "Source": "/etc/config",
+                    "Destination": "/etc/config",
+                    "Mode": "",
+                    "RW": false
+                }
+            ]
+        }]"#;
+        let result = project_inspect_json(json, "mybox", &Backend::Podman).unwrap();
+        assert_eq!(result.mounts.len(), 2);
+        // Empty Mode + RW=true → projected as "rw"
+        assert_eq!(
+            result.mounts[0].mode, "rw",
+            "empty Mode with RW=true must project as rw"
+        );
+        // Empty Mode + RW=false → projected as "ro"
+        assert_eq!(
+            result.mounts[1].mode, "ro",
+            "empty Mode with RW=false must project as ro"
         );
     }
 
