@@ -1,0 +1,32 @@
+#!/bin/sh
+# pre-push — runs `make check` before every push.
+#
+# Bypass with:  git push --no-verify
+# Install via:  make hooks   (sets core.hooksPath = .githooks)
+#
+# The full gate mirrors CI: fmt-check → clippy (tui-on) → clippy (tui-off)
+#                           → build (debug) → build (release) → test.
+
+set -e
+
+# Detect whether the cbox-dev image exists.  If not, bail with a clear message
+# rather than a cryptic Docker error deep inside the make chain.
+ENGINE="${ENGINE:-docker}"
+if ! "$ENGINE" image inspect cbox-dev >/dev/null 2>&1; then
+    echo "pre-push: cbox-dev image not found." >&2
+    echo "  Run 'make dev-init' to build it, then push again." >&2
+    echo "  (Bypass this hook with 'git push --no-verify'.)" >&2
+    exit 1
+fi
+
+echo "pre-push: running 'make check' (bypass with git push --no-verify) ..."
+
+if ! make check; then
+    echo "" >&2
+    echo "pre-push: 'make check' failed — fix the errors above, or bypass" >&2
+    echo "  with 'git push --no-verify' if you know what you're doing." >&2
+    exit 1
+fi
+
+echo "pre-push: 'make check' passed."
+exit 0
