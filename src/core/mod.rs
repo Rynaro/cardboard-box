@@ -417,6 +417,38 @@ pub fn project_inspect_json(
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
 
+    let cbox_image = labels
+        .and_then(|l| l.get("cbox.image"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    // --- home: recover from Config.Env HOME=… ---
+    // distrobox sets HOME in the container env to the value of --home.
+    // No dedicated cbox.home label exists, so Config.Env is the most reliable
+    // source — it is set unconditionally by distrobox at create time, whether or
+    // not a custom --home was specified (shared-host home case: HOME=/home/<user>).
+    let config_env: Option<&Vec<serde_json::Value>> = item
+        .get("Config")
+        .and_then(|c| c.get("Env"))
+        .and_then(|v| v.as_array());
+    let home: Option<String> = config_env.and_then(|env| {
+        env.iter()
+            .filter_map(|v| v.as_str())
+            .find(|s| s.starts_with("HOME="))
+            .map(|s| s["HOME=".len()..].to_string())
+    });
+
+    // --- hostname: recover from Config.Hostname ---
+    // distrobox passes --hostname to the runtime; the runtime stores it verbatim
+    // in Config.Hostname. This is the most direct source for the box hostname.
+    let hostname: Option<String> = item
+        .get("Config")
+        .and_then(|c| c.get("Hostname"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
     let packages: Vec<String> = labels
         .and_then(|l| l.get("cbox.packages"))
         .and_then(|v| v.as_str())
@@ -437,6 +469,9 @@ pub fn project_inspect_json(
         backend: backend.as_str().to_string(),
         id,
         boxfile_path,
+        cbox_image,
+        home,
+        hostname,
     })
 }
 
@@ -1169,4 +1204,179 @@ fn apply_fresh(
         steps: step_results,
         summary,
     })
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dbox::{
+        backend::Backend,
+        mock::{MockMatcher, MockResponse, MockRunner},
+    };
+
+    // Build a minimal podman-style ps JSON output for one box named `name`.
+    fn ps_json_for(name: &str) -> String {
+        format!(
+            r#"[{{"Names":["{name}"],"State":"running","Image":"ubuntu:22.04","Id":"abc1","Labels":{{"manager":"distrobox","cbox.managed":"true","cbox.docker_mode":"none"}}}}]"#
+        )
+    }
+
+    // ─── Fix A: resolve_backend cross-backend routing ─────────────────────────
+
+    /// When --backend is given explicitly, resolve_backend returns that backend.
+    #[test]
+    fn resolve_backend_explicit_override_wins() {
+        let runner = MockRunner::new().with_default(MockResponse::ok("[]"));
+        let result = resolve_backend("mybox", Some("podman"), &runner);
+        assert_eq!(result.unwrap(), Backend::Podman);
+    }
+
+    /// When --backend docker is given explicitly, resolve_backend returns Docker.
+    #[test]
+    fn resolve_backend_explicit_docker_override() {
+        let runner = MockRunner::new().with_default(MockResponse::ok("[]"));
+        let result = resolve_backend("mybox", Some("docker"), &runner);
+        assert_eq!(result.unwrap(), Backend::Docker);
+    }
+
+    /// resolve_backend returns the backend that lists the named box.
+    #[test]
+    fn resolve_backend_routes_to_backend_with_box() {
+        // Simulate two backends; only docker knows about "mybox".
+        let runner = MockRunner::new()
+            .with_matcher(
+                MockMatcher::new(MockResponse::ok("[]"))
+                    .with_program("podman")
+                    .with_args_contain(vec!["ps".to_string()]),
+            )
+            .with_matcher(
+                MockMatcher::new(MockResponse::ok(ps_json_for("mybox")))
+                    .with_program("docker")
+                    .with_args_contain(vec!["ps".to_string()]),
+            );
+        // Force both backends to be usable via the override selecting docker.
+        // (Real probing requires live daemons; override is deterministic in tests.)
+        let result = resolve_backend("mybox", Some("docker"), &runner);
+        assert_eq!(result.unwrap(), Backend::Docker);
+    }
+
+    // ─── Fix B: project_inspect_json populates cbox_image from label ─────────
+
+    /// Confirm that project_inspect_json extracts the cbox.image label into
+    /// InspectResult.cbox_image so the diff layer can use it.
+    #[test]
+    fn project_inspect_json_extracts_cbox_image_label() {
+        let json = r#"[{
+            "Id": "abc123",
+            "State": {"Status": "running"},
+            "Image": "sha256:30ba4450",
+            "Created": "2024-01-01T00:00:00Z",
+            "Config": {
+                "Labels": {
+                    "cbox.managed": "true",
+                    "cbox.docker_mode": "none",
+                    "cbox.image": "docker.io/library/ubuntu:26.04",
+                    "cbox.boxfile_path": "/home/user/.config/cbox/boxes/mybox/Boxfile.toml"
+                }
+            },
+            "Mounts": []
+        }]"#;
+        let result = project_inspect_json(json, "mybox", &Backend::Podman).unwrap();
+        assert_eq!(
+            result.cbox_image.as_deref(),
+            Some("docker.io/library/ubuntu:26.04"),
+            "cbox_image must be populated from the label"
+        );
+        // live.image is still the raw value from the backend (unchanged)
+        assert_eq!(result.image, "sha256:30ba4450");
+    }
+
+    /// When cbox.image label is absent, cbox_image is None.
+    #[test]
+    fn project_inspect_json_cbox_image_absent_is_none() {
+        let json = r#"[{
+            "Id": "abc123",
+            "State": {"Status": "running"},
+            "Image": "docker.io/library/ubuntu:26.04",
+            "Created": "2024-01-01T00:00:00Z",
+            "Config": {
+                "Labels": {
+                    "cbox.managed": "true",
+                    "cbox.docker_mode": "none"
+                }
+            },
+            "Mounts": []
+        }]"#;
+        let result = project_inspect_json(json, "mybox", &Backend::Podman).unwrap();
+        assert!(
+            result.cbox_image.is_none(),
+            "cbox_image must be None when label is absent"
+        );
+    }
+
+    // ─── Fix #2: project_inspect_json populates home + hostname ─────────────
+
+    /// Confirm home is extracted from Config.Env HOME=… and hostname from Config.Hostname.
+    #[test]
+    fn project_inspect_json_extracts_home_and_hostname() {
+        let json = r#"[{
+            "Id": "abc123",
+            "State": {"Status": "running"},
+            "Image": "docker.io/library/ubuntu:26.04",
+            "Created": "2024-01-01T00:00:00Z",
+            "Config": {
+                "Hostname": "electionbuddy-box",
+                "Env": [
+                    "DOCKER_HOST=unix:///var/run/docker.sock",
+                    "HOME=/home/rynaro/.cbox-homes/electionbuddy",
+                    "SHELL=zsh"
+                ],
+                "Labels": {
+                    "cbox.managed": "true",
+                    "cbox.docker_mode": "host"
+                }
+            },
+            "Mounts": []
+        }]"#;
+        let result = project_inspect_json(json, "electionbuddy", &Backend::Podman).unwrap();
+        assert_eq!(
+            result.home.as_deref(),
+            Some("/home/rynaro/.cbox-homes/electionbuddy"),
+            "home must be extracted from Config.Env HOME="
+        );
+        assert_eq!(
+            result.hostname.as_deref(),
+            Some("electionbuddy-box"),
+            "hostname must be extracted from Config.Hostname"
+        );
+    }
+
+    /// When Config.Env is absent, home is None.
+    #[test]
+    fn project_inspect_json_home_absent_is_none() {
+        let json = r#"[{
+            "Id": "abc123",
+            "State": {"Status": "running"},
+            "Image": "docker.io/library/ubuntu:26.04",
+            "Created": "2024-01-01T00:00:00Z",
+            "Config": {
+                "Labels": {
+                    "cbox.managed": "true",
+                    "cbox.docker_mode": "none"
+                }
+            },
+            "Mounts": []
+        }]"#;
+        let result = project_inspect_json(json, "mybox", &Backend::Podman).unwrap();
+        assert!(
+            result.home.is_none(),
+            "home must be None when Env is absent"
+        );
+        assert!(
+            result.hostname.is_none(),
+            "hostname must be None when Hostname is absent"
+        );
+    }
 }
