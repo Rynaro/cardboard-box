@@ -86,11 +86,15 @@ pub fn run(
     ctx: &OutputCtx,
     runner: &dyn DistroboxRunner,
 ) -> Result<(), CboxError> {
-    let backend = Backend::detect(global_backend)?;
+    // Name resolution happens before backend resolution because we need the name
+    // to look up which backend already hosts the box (mirrors the `enter` pattern).
+    // We build the CreateSpec first using Backend::detect as a placeholder, then
+    // replace the backend with the resolve_backend result once we have the name.
+    let detected_backend = Backend::detect(global_backend)?;
 
-    let create_spec = if let Some(ref file_path) = args.file {
+    let mut create_spec = if let Some(ref file_path) = args.file {
         // Priority 1: --file explicitly given.
-        spec_from_boxfile(file_path, &backend)?
+        spec_from_boxfile(file_path, &detected_backend)?
     } else if let Some(ref name) = args.name {
         // Priority 2: positional NAME given — existing label/XDG behaviour.
         if !is_valid_name(name) {
@@ -114,7 +118,7 @@ pub fn run(
             root: false,
             boxfile_path: None,
             unshare: None,
-            backend: backend.clone(),
+            backend: detected_backend.clone(),
             uid: get_uid(),
             dry_run: global_dry_run,
         }
@@ -127,12 +131,18 @@ pub fn run(
         if !ctx.quiet {
             ctx.hint(&format!("Using ./{cwd_path}"));
         }
-        spec_from_boxfile(cwd_path, &backend)?
+        spec_from_boxfile(cwd_path, &detected_backend)?
     } else {
         return Err(CboxError::usage(
             "NAME is required unless --file is provided or a Boxfile.toml exists in the current directory.",
         ));
     };
+
+    // Route to whichever engine actually hosts this box — mirrors the pattern
+    // used by `enter`. When the box doesn't exist yet, resolve_backend falls back
+    // to the preferred usable backend, which is the correct target for creation.
+    let backend = core::resolve_backend(&create_spec.name, global_backend, runner)?;
+    create_spec.backend = backend;
 
     let up_spec = UpSpec {
         create_spec,
