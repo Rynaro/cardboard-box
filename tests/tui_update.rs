@@ -379,15 +379,8 @@ fn ac_apply_recreate_err_sets_confirm_modal() {
     use cbox::tui::model::ProgressState;
 
     let apply_spec = ApplySpec {
-        name: "web-dev".to_string(),
-        boxfile_path: "/tmp/Boxfile.toml".to_string(),
-        force: false,
-        redo: vec![],
-        no_provision: false,
-        recreate: false,
         yes: true,
-        dry_run: false,
-        backend: Backend::Podman,
+        ..ApplySpec::new("web-dev", "/tmp/Boxfile.toml", Backend::Podman)
     };
 
     let mut model = make_model();

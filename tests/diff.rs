@@ -14,6 +14,8 @@ fn base_boxfile(name: &str, image: &str) -> Boxfile {
         sandbox: Default::default(),
         box_config: Default::default(),
         provision: vec![],
+        secrets: std::collections::BTreeMap::new(),
+        env: std::collections::BTreeMap::new(),
     }
 }
 

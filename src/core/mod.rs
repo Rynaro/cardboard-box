@@ -3,6 +3,7 @@
 
 pub mod diff;
 pub mod provision;
+pub mod secret_inject;
 pub mod spec;
 pub mod state_store;
 
@@ -17,10 +18,12 @@ use crate::dbox::{
     runner::{DistroboxRunner, Invocation, RunMode},
 };
 use crate::error::CboxError;
+use secret_inject::{build_env_keys, build_secret_specs, env_secret_fingerprint};
 use spec::{
     ApplyOutcome, ApplySpec, ApplySummary, BackendInfo, BackendStatus, BoxRow, CreateSpec,
     DiffResult, DistroboxInfo, DoctorResult, DoctorSpec, EditSpec, EnterSpec, InspectResult,
-    InspectSpec, MountResult, ProvisionStepResult, RmSpec, StopSpec, UpOutcome, UpSpec,
+    InspectSpec, KeyringStatus, MountResult, ProvisionStepResult, RmSpec, StopSpec, UpOutcome,
+    UpSpec,
 };
 use state_store::{ProvisionState, ProvisionStateStore};
 
@@ -43,7 +46,9 @@ pub fn create(spec: &CreateSpec, runner: &dyn DistroboxRunner) -> Result<CreateO
     } else {
         RunMode::Capture
     };
-    let inv = Invocation::new("distrobox", args.clone(), mode);
+    // Secret VALUES ride the child process environment (Invocation.env), not argv.
+    // argv carries only `--env KEY` (name-only) so values never hit argv (INV-1).
+    let inv = Invocation::new("distrobox", args.clone(), mode).with_env(spec.env_values.clone());
     let out = runner.run(inv)?;
 
     if spec.dry_run {
@@ -548,7 +553,20 @@ fn parse_mounts(item: &serde_json::Value) -> Vec<MountResult> {
 
 // ─── inspect raw ─────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 pub fn inspect_raw(spec: &InspectSpec, runner: &dyn DistroboxRunner) -> Result<String, CboxError> {
+    inspect_raw_with_secret_keys(spec, runner, &[])
+}
+
+/// `inspect --raw` variant that masks known secret KEYs in `Config.Env`.
+/// `secret_keys` = the KEY names declared in the box's Boxfile [secrets] table.
+/// For each key, any "KEY=<value>" in Config.Env is rewritten to "KEY=***".
+/// If `secret_keys` is empty, no masking is applied.
+pub fn inspect_raw_with_secret_keys(
+    spec: &InspectSpec,
+    runner: &dyn DistroboxRunner,
+    secret_keys: &[String],
+) -> Result<String, CboxError> {
     let args = build_inspect_argv(&spec.name);
     let inv = Invocation::new(spec.backend.as_str(), args, RunMode::Capture);
     let out = runner.run(inv)?;
@@ -556,7 +574,55 @@ pub fn inspect_raw(spec: &InspectSpec, runner: &dyn DistroboxRunner) -> Result<S
     if out.status != 0 {
         return Err(CboxError::backend_error(out.status, &out.stderr, &out.argv));
     }
-    Ok(out.stdout)
+
+    if secret_keys.is_empty() {
+        return Ok(out.stdout);
+    }
+
+    // Mask known secret keys in Config.Env (S3 courtesy masking).
+    mask_secret_keys_in_raw_json(&out.stdout, secret_keys)
+}
+
+/// Parse raw backend JSON and mask `Config.Env` values for known secret keys.
+/// Replaces "KEY=<anything>" with "KEY=***" for each key in `secret_keys`.
+/// On parse failure, returns the original JSON unchanged (best-effort masking).
+pub fn mask_secret_keys_in_raw_json(
+    raw_json: &str,
+    secret_keys: &[String],
+) -> Result<String, CboxError> {
+    let mut value: serde_json::Value = match serde_json::from_str(raw_json) {
+        Ok(v) => v,
+        Err(_) => return Ok(raw_json.to_string()), // can't parse → return as-is
+    };
+
+    // Handle both array (podman) and single object (docker).
+    let items: Vec<&mut serde_json::Value> = match value {
+        serde_json::Value::Array(ref mut arr) => arr.iter_mut().collect(),
+        ref mut obj @ serde_json::Value::Object(_) => vec![obj],
+        _ => return Ok(raw_json.to_string()),
+    };
+
+    for item in items {
+        if let Some(env_arr) = item
+            .pointer_mut("/Config/Env")
+            .and_then(|v| v.as_array_mut())
+        {
+            for entry in env_arr.iter_mut() {
+                if let Some(s) = entry.as_str() {
+                    for key in secret_keys {
+                        let prefix = format!("{key}=");
+                        if s.starts_with(&prefix) {
+                            *entry = serde_json::Value::String(format!("{key}=***"));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    serde_json::to_string_pretty(&value)
+        .map_err(|e| CboxError::ioerr(format!("Failed to re-serialize inspect JSON: {e}")))
 }
 
 // ─── doctor ──────────────────────────────────────────────────────────────────
@@ -564,7 +630,11 @@ pub fn inspect_raw(spec: &InspectSpec, runner: &dyn DistroboxRunner) -> Result<S
 /// Minimum supported distrobox version.
 pub const DISTROBOX_FLOOR: (u32, u32, u32) = (1, 6, 0);
 
-pub fn doctor(spec: &DoctorSpec, runner: &dyn DistroboxRunner) -> Result<DoctorResult, CboxError> {
+pub fn doctor(
+    spec: &DoctorSpec,
+    runner: &dyn DistroboxRunner,
+    secret_store: &dyn crate::secret::SecretStore,
+) -> Result<DoctorResult, CboxError> {
     let mut warnings = Vec::new();
 
     // 1. Check distrobox
@@ -591,12 +661,38 @@ pub fn doctor(spec: &DoctorSpec, runner: &dyn DistroboxRunner) -> Result<DoctorR
         ));
     }
 
+    // 3. Probe keyring (non-fatal informational line).
+    // Use a no-write probe: get("__cbox_doctor__", "__probe__").
+    // Ok(_) means the Service is reachable; Err(Unavailable) means it is not.
+    let keyring = probe_keyring(secret_store);
+
     Ok(DoctorResult {
         ok,
         distrobox: dbox_info,
         backend: backend_info,
         warnings,
+        keyring,
     })
+}
+
+fn probe_keyring(store: &dyn crate::secret::SecretStore) -> KeyringStatus {
+    use crate::secret::SecretError;
+    match store.get("__cbox_doctor__", "__probe__") {
+        Ok(_) => KeyringStatus {
+            available: true,
+            detail: "Secret Service reachable.".to_string(),
+        },
+        Err(SecretError::Unavailable(msg)) => KeyringStatus {
+            available: false,
+            detail: format!(
+                "Secret Service unreachable; secrets will refuse until you unlock it. ({msg})"
+            ),
+        },
+        Err(e) => KeyringStatus {
+            available: false,
+            detail: format!("Keyring probe error: {e}"),
+        },
+    }
 }
 
 fn check_distrobox(runner: &dyn DistroboxRunner, warnings: &mut Vec<String>) -> DistroboxInfo {
@@ -846,7 +942,28 @@ pub fn apply(
     };
 
     // 3. Diff
-    let diff_result = diff::diff_boxfile_vs_live(&bf, &live);
+    let mut diff_result = diff::diff_boxfile_vs_live(&bf, &live);
+
+    // 3b. Secret/env fingerprint diff (must participate — do NOT assume unchanged).
+    // We need to read the stored state to get the prior fingerprint.
+    // For the Recreate flow the state is irrelevant (full recreate wipes it), but
+    // for incremental we must check it before deciding to skip or run.
+    // Read state here so we can use it later (step 6) as well.
+    let state_for_diff = store
+        .read(&spec.name, runner)
+        .unwrap_or_else(|_| ProvisionState::new());
+    if let Some(secret_diff_field) = diff::diff_secrets(
+        &state_for_diff.env_secret_fingerprint,
+        &state_for_diff.secret_specs,
+        &bf,
+    ) {
+        diff_result.fields.push(secret_diff_field);
+        // Re-classify the overall diff based on the new field
+        if diff_result.fields.iter().any(|f| f.class == "Recreate") {
+            diff_result.class = "Recreate".to_string();
+        }
+    }
+
     let recreate_required = diff_result.class == "Recreate";
 
     if recreate_required && !spec.recreate {
@@ -881,8 +998,12 @@ pub fn apply(
         };
         rm(&rm_spec, runner)?;
 
-        // Build a CreateSpec from the Boxfile
-        let create_spec = create_spec_from_boxfile_and_apply_spec(&bf, spec);
+        // Build a CreateSpec from the Boxfile, then inject any resolved persist=true
+        // secrets from the ApplySpec's recreate fields (populated by the CLI caller).
+        let mut create_spec = create_spec_from_boxfile_and_apply_spec(&bf, spec);
+        create_spec.env_flags = spec.recreate_env_flags.clone();
+        create_spec.env_values = spec.recreate_env_values.clone();
+        create_spec.plain_env = spec.recreate_plain_env.clone();
         create(&create_spec, runner)?;
 
         // Fresh box: all steps run (no state yet)
@@ -923,11 +1044,22 @@ pub fn apply(
         });
     }
 
+    // Use state_for_diff if we already read it (for fingerprint comparison).
+    // If --force, reset to empty (all steps re-run).
     let state = if spec.force {
-        // --force: treat as empty state → all steps run
         ProvisionState::new()
     } else {
-        read_state_with_force(&spec.name, spec.force, store, runner)?
+        // Re-use the state we already read for the fingerprint diff, unless it
+        // was a fallback empty state due to a read error (in which case re-read
+        // to surface the actual error consistently).
+        if !state_for_diff.boxfile_sha.is_empty()
+            || !state_for_diff.steps.is_empty()
+            || !state_for_diff.env_secret_fingerprint.is_empty()
+        {
+            state_for_diff
+        } else {
+            read_state_with_force(&spec.name, spec.force, store, runner)?
+        }
     };
 
     run_provision_and_build_outcome(spec, &bf, state, diff_result, false, store, runner)
@@ -954,6 +1086,10 @@ fn run_provision_and_build_outcome(
         force: spec.force,
         redo: &spec.redo,
         dry_run: spec.dry_run,
+        // persist=false secret injection: threaded in from ApplySpec (resolved by CLI
+        // caller via run_with_store before any spawn — D3 all-or-nothing guarantee).
+        provision_env_keys: &spec.provision_env_keys,
+        provision_env: &spec.provision_env,
     };
 
     let step_results = match provision::provision(&plan, store, runner, &mut state) {
@@ -964,6 +1100,14 @@ fn run_provision_and_build_outcome(
             return Err(e);
         }
     };
+
+    // Write the current fingerprint + metadata into state so the NEXT apply can
+    // read it back (anti-blind-spot: fingerprint MUST be written AND read, not
+    // write-once-ignored like the original boxfile_sha).
+    state.env_secret_fingerprint = env_secret_fingerprint(bf);
+    state.secret_specs = build_secret_specs(bf);
+    state.env_keys = build_env_keys(bf);
+    let _ = store.write(&spec.name, &state, runner); // best-effort
 
     let summary = summarize(&step_results);
     Ok(ApplyOutcome {
@@ -1097,6 +1241,15 @@ fn create_spec_from_boxfile_and_apply_spec(
         backend: spec.backend.clone(),
         uid: get_host_uid(),
         dry_run: spec.dry_run,
+        // Secret injection is handled by the caller (apply path resolves secrets
+        // before calling create, then sets these fields on the returned spec).
+        // For the recreate path through apply (no CLI secret store available here),
+        // we leave these empty — secret injection via apply is handled by the apply
+        // caller which has access to the store. The pure-core recreate path does not
+        // have a store reference; the CLI caller must handle it.
+        env_flags: Vec::new(),
+        env_values: Vec::new(),
+        plain_env: Vec::new(),
     }
 }
 
@@ -1168,15 +1321,22 @@ pub fn up(
     } else {
         // Existing box: full apply (inspect, diff, incremental provision)
         let apply_spec = ApplySpec {
-            name: name.clone(),
-            boxfile_path,
             force: spec.apply_force,
             redo: spec.apply_redo.clone(),
             no_provision: spec.no_provision,
             recreate: spec.recreate,
             yes: spec.yes,
             dry_run: spec.dry_run,
-            backend: spec.create_spec.backend.clone(),
+            // Thread persist=false provision secrets from UpSpec into the apply call.
+            provision_env_keys: spec.provision_env_keys.clone(),
+            provision_env: spec.provision_env.clone(),
+            // Recreate secrets: the create_spec already has env_flags/env_values
+            // from the CLI resolve step; mirror them so core::apply's recreate path
+            // can use them when it constructs the recreate CreateSpec.
+            recreate_env_flags: spec.create_spec.env_flags.clone(),
+            recreate_env_values: spec.create_spec.env_values.clone(),
+            recreate_plain_env: spec.create_spec.plain_env.clone(),
+            ..ApplySpec::new(name, boxfile_path, spec.create_spec.backend.clone())
         };
         apply(&apply_spec, store, runner)?
     };
@@ -1232,10 +1392,19 @@ fn apply_fresh(
         force: true, // fresh box: always run all steps
         redo: &[],
         dry_run: spec.dry_run,
+        provision_env_keys: &spec.provision_env_keys,
+        provision_env: &spec.provision_env,
     };
 
     let mut state = ProvisionState::new();
     let step_results = provision::provision(&plan, store, runner, &mut state)?;
+
+    // Write the fingerprint after first provision so subsequent applies see it
+    // and do not spuriously re-converge (AC-DIFF-3 anti-blind-spot).
+    state.env_secret_fingerprint = env_secret_fingerprint(&bf);
+    state.secret_specs = build_secret_specs(&bf);
+    state.env_keys = build_env_keys(&bf);
+    let _ = store.write(name, &state, runner); // best-effort
 
     let summary = summarize(&step_results);
     Ok(ApplyOutcome {

@@ -301,6 +301,7 @@ All commands honor global flags: `--json`, `-q`/`--quiet`, `-v` (show argv), `-v
 | `cbox apply <NAME>` | — | Converge a box to its Boxfile | `--file`, `--force`, `--redo <IDX>`, `--no-provision`, `--recreate`, `--dry-run`, `--json` |
 | `cbox up <NAME>` | — | Create-if-absent then apply | All create + apply flags |
 | `cbox doctor` | — | Preflight: distrobox + backend health | `--json` |
+| `cbox secret set\|list\|rm <BOX> [KEY]` | — | Store / list / remove secrets in the OS keyring; `set` reads value from hidden prompt or stdin | `--json` |
 | `cbox` (no args) | `cbox tui` | Launch the TUI (TTY only) | — |
 
 </details>
@@ -316,7 +317,7 @@ All commands honor global flags: `--json`, `-q`/`--quiet`, `-v` (show argv), `-v
 | 69 | Unavailable (box does not exist) |
 | 70 | Software error (distrobox missing, or TUI built without `tui` feature) |
 | 74 | I/O error (spawn/capture failure, guest state-file corruption) |
-| 75 | Temporary failure (backend unreachable) |
+| 75 | Temporary failure (backend unreachable, or OS keyring / Secret Service unavailable or a referenced secret is missing) |
 | 125 | Backend non-zero (wrapped distrobox exited non-zero) |
 
 </details>
@@ -358,6 +359,15 @@ home = ""                                             # string path, default "" 
 hostname = ""                                         # string, default "" (unset). custom hostname
 pull = false                                          # bool, default false. pull image before create
 
+# --- plaintext env (optional) ---
+[env]
+EDITOR = "nvim"                                       # string, default "". committed non-secret config
+
+# --- keyring-backed secrets (optional) ---
+[secrets]
+DATABASE_URL = { persist = true, from = "keyring" }  # bool + enum. value stored in OS keyring, not Boxfile
+API_TOKEN = { persist = false, from = "keyring" }    # persist=false means inject only at provision time
+
 # --- provisioning (optional) ---
 [[provision]]
 type = "shell"                                        # enum: "shell" | "copy"
@@ -383,10 +393,71 @@ dst = "/home/me/.bashrc"                             # string, required if type=
 | `box.home` | string | `""` | no | Custom home directory path in box |
 | `box.hostname` | string | `""` | no | Custom hostname inside box |
 | `box.pull` | bool | `false` | no | Force pull image at create time |
+| `env.<KEY>` | string | — | no | Plaintext env var, committed in Boxfile |
+| `secrets.<KEY>.persist` | bool | `true` | no | If `true`, secret baked into persistent container env; if `false`, injected only during `cbox apply`/`up` provision steps |
+| `secrets.<KEY>.from` | enum | `"keyring"` | no | Only `"keyring"` supported today (OS Secret Service) |
 | `provision[].type` | enum | — | yes-in-entry | `"shell"` or `"copy"` |
 | `provision[].run` | string | — | if `type="shell"` | Shell command |
 | `provision[].src` | string | — | if `type="copy"` | Source file (on host), relative to Boxfile dir |
 | `provision[].dst` | string | — | if `type="copy"` | Destination path (in box), must be absolute |
+
+</details>
+
+<details>
+<summary><strong>Secrets (keyring-backed)</strong></summary>
+
+**Declare secrets in the Boxfile** — by key name only. Values never appear in committed files:
+
+```toml
+[secrets]
+DATABASE_URL = { persist = true, from = "keyring" }
+API_TOKEN = { persist = false, from = "keyring" }
+```
+
+**Store a secret value** (one time per box):
+
+```bash
+# Hidden prompt (input is not echoed as you type):
+cbox secret set web-dev DATABASE_URL
+# Enter the value at the prompt. Stored in the OS keyring.
+
+# Or read from stdin (for scripts/CI):
+printf '%s' "$MY_TOKEN" | cbox secret set web-dev API_TOKEN
+```
+
+**List stored secrets** (key names only; values never printed):
+
+```bash
+cbox secret list web-dev
+# DATABASE_URL
+# API_TOKEN
+
+# JSON format:
+cbox secret list web-dev --json
+# {"keys": ["DATABASE_URL", "API_TOKEN"]}
+```
+
+**Remove a secret** (idempotent):
+
+```bash
+cbox secret rm web-dev API_TOKEN
+```
+
+**Use the secrets in your box:**
+
+- **`persist = true`** (default): The value is resolved from the keyring at create time and baked into the box's persistent environment. Every `cbox enter` sees it. `cbox up` / `cbox apply` / `cbox create` all require the keyring to be available; if it's missing or locked, they exit 75 (Temporary failure) and change nothing.
+
+- **`persist = false`**: The value is injected only during `cbox apply` or `cbox up` provision steps. Never persisted; absent from later interactive `cbox enter` shells. Useful for secrets that must not survive the provisioning phase.
+
+If a declared secret is not set in the keyring, `cbox up`/`apply`/`create` refuses with exit 75 and suggests `cbox secret set <BOX> <KEY>`.
+
+**Rotate a secret value:**
+
+1. Run `cbox secret set <box> <KEY>` with the new value.
+2. For `persist = false`: just re-enter the provision step or run `cbox apply`.
+3. For `persist = true`: run `cbox apply <box> --recreate` (the value is fixed in the container's `Config.Env` at creation time).
+
+**The honest caveat:** A `persist = true` secret is baked into the container's real environment (`Config.Env`). The host's own `podman inspect <box>` or `docker inspect <box>` can still read it—cbox masks its own `inspect --raw`, but the container engine itself cannot hide values from privileged host access. For secrets that must never sit in persistent container memory, use `persist = false` (provision-time only). This is a trade-off of persistent availability, not a bug.
 
 </details>
 
@@ -466,7 +537,7 @@ Prints the plan (which steps would SKIP or RUN, which fields differ) without exe
 
 **Tests use mocks.** All 129 tests run without any real distrobox installed. Real-host validation happens via optional smoke tests (`#[ignore]`, manual run).
 
-**No secrets support yet.** v1.0 does not support embedded secrets. `[[provision]].run` is plain text in the Boxfile (trust boundary = your Boxfile). For sensitive data, store it outside the Boxfile (e.g., in `$HOME/.env`, mounted read-only) and source it in a run step.
+**Secrets via keyring.** Declare secrets in `[secrets]` (KEY names only; values live in the OS keyring, never the Boxfile). Use `cbox secret set <BOX> <KEY>` to store values. `persist = true` keeps them in the box's persistent env (visible to `podman inspect` from the host); `persist = false` injects them only during provision steps. The keyring must be available and unlocked; if it's not, `cbox up`/`apply` exits 75 and changes nothing.
 
 **No distrobox-export yet.** v1.0 focuses on the box itself. `distrobox-export` integration is a future feature.
 

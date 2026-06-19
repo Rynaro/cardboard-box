@@ -195,6 +195,11 @@ pub fn render_doctor(result: &crate::core::spec::DoctorResult, ctx: &OutputCtx) 
         println!("    docker:   reachable={}", bk.docker.reachable);
     }
 
+    // keyring (non-fatal informational line)
+    let kr = &result.keyring;
+    let kr_avail = if kr.available { "yes" } else { "no" };
+    println!("  keyring:    available={kr_avail} — {}", kr.detail);
+
     for w in &result.warnings {
         ctx.warn(w);
     }

@@ -1,6 +1,7 @@
 //! Serde structs for Boxfile.toml (§6). Unknown top-level keys → warning, not error.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// The Boxfile.toml declarative manifest.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +36,37 @@ pub struct Boxfile {
     /// Provisioning steps (P1: parsed+validated only; P2: executed).
     #[serde(default)]
     pub provision: Vec<ProvisionStep>,
+
+    /// Secret KEY references. Values live ONLY in the OS keyring (D0).
+    /// Each entry is `{ persist = <bool>, from = "keyring" }`.
+    #[serde(default)]
+    pub secrets: BTreeMap<String, SecretEntry>,
+
+    /// Plaintext, non-secret env. Values are fine in argv (not secret).
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+}
+
+/// A [secrets] entry — KEY-only reference; value lives in the keyring (D0).
+/// `deny_unknown_fields` is ON (per sub-table convention) to catch typos hard.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SecretEntry {
+    /// When true (default), the secret is baked into Config.Env at create time.
+    /// When false, it is injected only into provision exec-sessions, never into Config.Env.
+    #[serde(default = "default_persist")]
+    pub persist: bool,
+    /// Backend source. Only "keyring" is valid in v1; "prompt" and others → exit 65.
+    #[serde(default = "default_from")]
+    pub from: String,
+}
+
+fn default_persist() -> bool {
+    true
+}
+
+fn default_from() -> String {
+    "keyring".to_string()
 }
 
 fn default_image() -> String {

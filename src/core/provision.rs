@@ -5,7 +5,7 @@ use crate::boxfile::model::{ProvisionStep, ProvisionType};
 use crate::core::spec::ProvisionStepResult;
 use crate::core::state_store::{epoch_secs, AppliedStep, ProvisionState, ProvisionStateStore};
 use crate::dbox::{
-    argv::{build_copy_argv, build_provision_shell_argv},
+    argv::{build_copy_argv, build_provision_shell_argv, build_provision_shell_argv_with_env},
     backend::Backend,
     runner::{DistroboxRunner, Invocation, RunMode},
 };
@@ -25,6 +25,14 @@ pub struct ProvisionPlan<'a> {
     pub force: bool,
     pub redo: &'a [usize],
     pub dry_run: bool,
+
+    // ─── persist=false secret injection (v5.0) ───────────────────────────────
+    /// KEY names for persist=false secrets → `--env KEY` (name-only) in argv.
+    /// Values ride `provision_env` on the Invocation.env; never in argv (INV-1).
+    pub provision_env_keys: &'a [String],
+    /// (KEY, VALUE) pairs for persist=false secrets → Invocation.env for shell steps.
+    /// EMPTY for copy steps (no secret injection needed for file copies).
+    pub provision_env: &'a [(String, String)],
 }
 
 // ─── Hashing (§5.2) ──────────────────────────────────────────────────────────
@@ -209,13 +217,20 @@ fn run_step(
     match step.step_type {
         ProvisionType::Shell => {
             let run = step.run.as_deref().unwrap_or("");
-            let args = build_provision_shell_argv(plan.name, run);
+            // Use env-aware argv builder when provision_env_keys are present.
+            // persist=false secret values ride Invocation.env (never in argv — INV-1).
+            let args = if plan.provision_env_keys.is_empty() {
+                build_provision_shell_argv(plan.name, run)
+            } else {
+                build_provision_shell_argv_with_env(plan.name, run, plan.provision_env_keys)
+            };
             let mode = if plan.dry_run {
                 RunMode::DryRun
             } else {
                 RunMode::Capture
             };
-            let inv = Invocation::new("distrobox", args, mode);
+            let inv =
+                Invocation::new("distrobox", args, mode).with_env(plan.provision_env.to_vec());
             let out = runner.run(inv)?;
 
             if out.status != 0 && !plan.dry_run {

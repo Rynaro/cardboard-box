@@ -4,11 +4,13 @@ use crate::boxfile::validate::is_valid_name;
 use crate::boxfile::{self, model::DockerModeField};
 use crate::core::{
     self,
+    secret_inject::{resolve_secret_env, SecretScope},
     spec::{CreateSpec, DockerMode, MountSpec},
 };
 use crate::dbox::backend::Backend;
 use crate::dbox::runner::DistroboxRunner;
 use crate::error::CboxError;
+use crate::secret::SecretStore;
 use clap::Args;
 
 #[derive(Args, Debug)]
@@ -62,6 +64,7 @@ pub struct CreateArgs {
     pub file: Option<String>,
 }
 
+#[allow(dead_code)]
 pub fn run(
     args: &CreateArgs,
     global_dry_run: bool,
@@ -69,13 +72,32 @@ pub fn run(
     ctx: &OutputCtx,
     runner: &dyn DistroboxRunner,
 ) -> Result<(), CboxError> {
+    run_with_store(args, global_dry_run, global_backend, ctx, runner, None)
+}
+
+/// Variant that accepts an optional SecretStore — used in tests and from main.rs.
+/// When `store` is None, no secret resolution happens (no [secrets] in the Boxfile
+/// or the caller guarantees the spec's env_flags/env_values are already populated).
+#[allow(clippy::too_many_arguments)]
+pub fn run_with_store(
+    args: &CreateArgs,
+    global_dry_run: bool,
+    global_backend: Option<&str>,
+    ctx: &OutputCtx,
+    runner: &dyn DistroboxRunner,
+    store: Option<&dyn SecretStore>,
+) -> Result<(), CboxError> {
     // Detect backend
     let backend = Backend::detect(global_backend)?;
 
     // Start building the spec — may be overridden by Boxfile
-    let mut spec = if let Some(ref file_path) = args.file {
+    let (mut spec, resolved_bf) = if let Some(ref file_path) = args.file {
         // Priority 1: --file explicitly given.
-        spec_from_boxfile(file_path, &backend)?
+        let (bf, warnings) = crate::boxfile::parse_file(file_path)?;
+        for w in &warnings {
+            eprintln!("warn: {w}");
+        }
+        (spec_from_boxfile_model(&bf, file_path, &backend)?, Some(bf))
     } else if let Some(ref name) = args.name {
         // Priority 2: positional NAME given.
         if !is_valid_name(name) {
@@ -83,7 +105,7 @@ pub fn run(
                 "Invalid box name \"{name}\". Names must match ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"
             )));
         }
-        CreateSpec::new(name.clone(), backend.clone())
+        (CreateSpec::new(name.clone(), backend.clone()), None)
     } else if let Some(cwd_path) = std::env::current_dir()
         .ok()
         .as_deref()
@@ -93,12 +115,32 @@ pub fn run(
         if !ctx.quiet {
             ctx.hint(&format!("Using ./{cwd_path}"));
         }
-        spec_from_boxfile(cwd_path, &backend)?
+        let (bf, warnings) = crate::boxfile::parse_file(cwd_path)?;
+        for w in &warnings {
+            eprintln!("warn: {w}");
+        }
+        (spec_from_boxfile_model(&bf, cwd_path, &backend)?, Some(bf))
     } else {
         return Err(CboxError::usage(
             "NAME is required unless --file is provided or a Boxfile.toml exists in the current directory.",
         ));
     };
+
+    // Resolve secrets (persist=true) from keyring — ALL-OR-NOTHING before any spawn (D3).
+    if let (Some(store), Some(ref bf)) = (store, &resolved_bf) {
+        if !bf.secrets.is_empty() {
+            let env_pairs =
+                resolve_secret_env(&spec.name, &bf.secrets, SecretScope::Persisted, store)?;
+            for (k, v) in &env_pairs {
+                spec.env_flags.push(k.clone());
+                spec.env_values.push((k.clone(), v.clone()));
+            }
+        }
+        // Populate plain_env from [env]
+        for (k, v) in &bf.env {
+            spec.plain_env.push((k.clone(), v.clone()));
+        }
+    }
 
     // CLI flags override Boxfile
     if args.image != "registry.fedoraproject.org/fedora-toolbox:latest" || args.file.is_none() {
@@ -161,12 +203,20 @@ pub fn run(
     Ok(())
 }
 
+#[allow(dead_code)]
 fn spec_from_boxfile(path: &str, backend: &Backend) -> Result<CreateSpec, CboxError> {
     let (bf, warnings) = boxfile::parse_file(path)?;
     for w in &warnings {
         eprintln!("warn: {w}");
     }
+    spec_from_boxfile_model(&bf, path, backend)
+}
 
+fn spec_from_boxfile_model(
+    bf: &crate::boxfile::model::Boxfile,
+    path: &str,
+    backend: &Backend,
+) -> Result<CreateSpec, CboxError> {
     // Validate name
     if !is_valid_name(&bf.name) {
         return Err(CboxError::dataerr(format!(
@@ -206,20 +256,20 @@ fn spec_from_boxfile(path: &str, backend: &Backend) -> Result<CreateSpec, CboxEr
         .collect();
 
     Ok(CreateSpec {
-        name: bf.name,
-        image: bf.image,
-        packages: bf.packages,
+        name: bf.name.clone(),
+        image: bf.image.clone(),
+        packages: bf.packages.clone(),
         docker_mode,
         mounts,
         home: if bf.box_config.home.is_empty() {
             None
         } else {
-            Some(bf.box_config.home)
+            Some(bf.box_config.home.clone())
         },
         hostname: if bf.box_config.hostname.is_empty() {
             None
         } else {
-            Some(bf.box_config.hostname)
+            Some(bf.box_config.hostname.clone())
         },
         init: bf.sandbox.init,
         pull: bf.box_config.pull,
@@ -229,6 +279,9 @@ fn spec_from_boxfile(path: &str, backend: &Backend) -> Result<CreateSpec, CboxEr
         backend: backend.clone(),
         uid,
         dry_run: false,
+        env_flags: Vec::new(),
+        env_values: Vec::new(),
+        plain_env: Vec::new(),
     })
 }
 

@@ -21,6 +21,8 @@ pub fn parse_and_validate(toml_text: &str) -> Result<(Boxfile, Vec<String>), Cbo
         "sandbox",
         "box",
         "provision",
+        "secrets",
+        "env",
     ];
 
     let mut warnings = Vec::new();

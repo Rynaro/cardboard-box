@@ -2,6 +2,7 @@
 //! Pure function: diff_boxfile_vs_live(bf, live) -> DiffResult.
 
 use crate::boxfile::model::Boxfile;
+use crate::core::secret_inject::{classify_secret_delta, SecretSpecSnapshot};
 use crate::core::spec::{DiffField, DiffResult, InspectResult, MountResult, PackageDiff};
 
 // ─── Public API ──────────────────────────────────────────────────────────────
@@ -172,6 +173,33 @@ pub fn diff_boxfile_vs_live(bf: &Boxfile, live: &InspectResult) -> DiffResult {
 /// Extract the package diff: which packages are added/removed vs live.
 pub fn package_diff(bf: &Boxfile, live: &InspectResult) -> PackageDiff {
     diff_packages(&bf.packages, &live.packages)
+}
+
+/// Diff the secrets/env schema between prior stored state and current Boxfile.
+///
+/// Returns `Some(DiffField)` when the fingerprint has changed; the `class` is
+/// "Recreate" when any persist=true secret was added/removed/flipped, or
+/// "Incremental" for all other changes. Returns `None` when fingerprints match.
+pub fn diff_secrets(
+    prior_fingerprint: &str,
+    prior_specs: &[SecretSpecSnapshot],
+    current_bf: &Boxfile,
+) -> Option<DiffField> {
+    use crate::core::secret_inject::env_secret_fingerprint;
+
+    let current_fp = env_secret_fingerprint(current_bf);
+    if current_fp == prior_fingerprint {
+        return None;
+    }
+
+    let class = classify_secret_delta(prior_specs, current_bf).to_string();
+
+    Some(DiffField {
+        field: "secrets".to_string(),
+        old: prior_fingerprint.to_string(),
+        new: current_fp,
+        class,
+    })
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -423,6 +451,8 @@ mod tests {
             provision: vec![],
             box_config: crate::boxfile::model::BoxConfig::default(),
             sandbox: crate::boxfile::model::SandboxConfig::default(),
+            secrets: std::collections::BTreeMap::new(),
+            env: std::collections::BTreeMap::new(),
         }
     }
 
@@ -554,6 +584,8 @@ mod tests {
                 pull: false,
             },
             sandbox: crate::boxfile::model::SandboxConfig::default(),
+            secrets: std::collections::BTreeMap::new(),
+            env: std::collections::BTreeMap::new(),
         }
     }
 
@@ -1123,6 +1155,8 @@ mod tests {
             provision: vec![],
             box_config: BoxConfig::default(),
             sandbox: SandboxConfig::default(),
+            secrets: std::collections::BTreeMap::new(),
+            env: std::collections::BTreeMap::new(),
         };
 
         let result = diff_boxfile_vs_live(&bf, &live);

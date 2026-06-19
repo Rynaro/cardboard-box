@@ -6,6 +6,22 @@ use crate::error::CboxError;
 const NAME_REGEX: &str = "^[a-zA-Z0-9][a-zA-Z0-9_.-]*$";
 const VALID_UNSHARE: &[&str] = &["netns", "ipc", "process", "devsys", "groups"];
 
+/// POSIX env-var name regex: first char alpha or underscore, rest alnum or underscore.
+const ENV_NAME_REGEX: &str = "^[A-Za-z_][A-Za-z0-9_]*$";
+
+/// Check that a [secrets] or [env] key is a valid env-var name.
+pub fn is_valid_env_name(k: &str) -> bool {
+    if k.is_empty() {
+        return false;
+    }
+    let mut chars = k.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 /// Validate a Boxfile. Returns a list of warnings (not fatal) and errors as CboxError::DataErr.
 pub struct ValidationResult {
     pub warnings: Vec<String>,
@@ -96,6 +112,72 @@ pub fn validate(bf: &Boxfile) -> Result<ValidationResult, CboxError> {
                     errors.push(format!("provision[{i}]: type=\"copy\" requires 'dst'."));
                 }
             }
+        }
+    }
+
+    // ─── [secrets] + [env] validation rules (V1–V6) ──────────────────────────
+
+    let total_count = bf.secrets.len() + bf.env.len();
+
+    // V4: count bound
+    if total_count > 64 {
+        errors.push(format!(
+            "Too many env/secret entries ({total_count}). The limit is 64."
+        ));
+    }
+
+    for (key, entry) in &bf.secrets {
+        // V5: key length
+        if key.len() > 128 {
+            errors.push(format!(
+                "env/secret key \"{key}\" is too long ({} chars). Max 128.",
+                key.len()
+            ));
+            continue;
+        }
+        // V1: valid env-var name
+        if !is_valid_env_name(key) {
+            errors.push(format!(
+                "secrets.\"{key}\": invalid env-var name. Must match {ENV_NAME_REGEX}"
+            ));
+        }
+        // V2: no collision with [env]
+        if bf.env.contains_key(key) {
+            errors.push(format!(
+                "\"{key}\" is declared in both [env] and [secrets]; a key may be one or the other, not both."
+            ));
+        }
+        // V3: from must be "keyring"
+        if entry.from != "keyring" {
+            errors.push(format!(
+                "secrets.\"{key}\".from = \"{}\" is not supported in this version. \
+                 Only \"keyring\" is valid (prompt-as-source is deferred).",
+                entry.from
+            ));
+        }
+    }
+
+    for (key, value) in &bf.env {
+        // V5: key length
+        if key.len() > 128 {
+            errors.push(format!(
+                "env/secret key \"{key}\" is too long ({} chars). Max 128.",
+                key.len()
+            ));
+            continue;
+        }
+        // V1: valid env-var name
+        if !is_valid_env_name(key) {
+            errors.push(format!(
+                "env.\"{key}\": invalid env-var name. Must match {ENV_NAME_REGEX}"
+            ));
+        }
+        // V6: value length
+        if value.len() > 4096 {
+            errors.push(format!(
+                "env.\"{key}\" value is too long ({} bytes). Max 4096.",
+                value.len()
+            ));
         }
     }
 

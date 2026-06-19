@@ -598,15 +598,9 @@ fn start_apply(model: &mut Model, name: &str, recreate: bool, backend: Backend) 
     let boxfile_path = format!("{config_home}/cbox/boxes/{name}/Boxfile.toml");
 
     let spec = ApplySpec {
-        name: name.to_string(),
-        boxfile_path,
-        force: false,
-        redo: vec![],
-        no_provision: false,
         recreate,
         yes: true,
-        dry_run: false,
-        backend,
+        ..ApplySpec::new(name, boxfile_path, backend)
     };
 
     model.screen = Screen::Progress;

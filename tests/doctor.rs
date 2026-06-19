@@ -3,6 +3,24 @@
 use cbox::core::{self, spec::DoctorSpec};
 use cbox::dbox::mock::{MockMatcher, MockResponse, MockRunner};
 use cbox::error::exit;
+use cbox::secret::{SecretError, SecretStore};
+
+/// No-op store for tests: doctor line always shows "unavailable".
+struct NoOpStore;
+impl SecretStore for NoOpStore {
+    fn set(&self, _: &str, _: &str, _: &str) -> Result<(), SecretError> {
+        Err(SecretError::Unavailable("test no-op".into()))
+    }
+    fn get(&self, _: &str, _: &str) -> Result<Option<String>, SecretError> {
+        Err(SecretError::Unavailable("test no-op".into()))
+    }
+    fn delete(&self, _: &str, _: &str) -> Result<(), SecretError> {
+        Err(SecretError::Unavailable("test no-op".into()))
+    }
+    fn list(&self, _: &str) -> Result<Vec<String>, SecretError> {
+        Err(SecretError::Unavailable("test no-op".into()))
+    }
+}
 
 fn good_runner() -> MockRunner {
     MockRunner::new()
@@ -41,7 +59,7 @@ fn ac_doctor_1_good_env() {
         backend_override: None,
     };
 
-    let result = core::doctor(&spec, &runner).expect("doctor should succeed");
+    let result = core::doctor(&spec, &runner, &NoOpStore).expect("doctor should succeed");
     assert!(result.ok, "ok should be true");
     assert_eq!(result.backend.selected.as_deref(), Some("podman"));
     assert!(result.distrobox.present);
@@ -63,7 +81,8 @@ fn ac_doctor_2_distrobox_missing() {
     let spec = DoctorSpec {
         backend_override: None,
     };
-    let err = core::doctor(&spec, &runner).expect_err("should fail when distrobox missing");
+    let err =
+        core::doctor(&spec, &runner, &NoOpStore).expect_err("should fail when distrobox missing");
     assert_eq!(err.exit_code(), exit::SOFTWARE, "exit 70 expected");
     assert!(
         err.to_string().contains("distrobox"),
@@ -95,7 +114,8 @@ fn ac_doctor_3_old_distrobox_version() {
     let spec = DoctorSpec {
         backend_override: None,
     };
-    let result = core::doctor(&spec, &runner).expect("doctor should succeed despite old version");
+    let result = core::doctor(&spec, &runner, &NoOpStore)
+        .expect("doctor should succeed despite old version");
 
     assert!(result.distrobox.present, "distrobox is present");
     assert!(!result.distrobox.supported, "1.4.2 is below floor 1.6");
