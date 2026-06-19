@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/Rynaro/cardboard-box/compare/v0.5.2...v0.6.0) (2026-06-19)
+
+
+### Features
+
+* **cli:** add stop command and fix rm on running boxes ([#22](https://github.com/Rynaro/cardboard-box/issues/22)) ([86d82b5](https://github.com/Rynaro/cardboard-box/commit/86d82b59b036d77c56eb46562312057556edfd45))
+
 ## [0.5.2](https://github.com/Rynaro/cardboard-box/compare/v0.5.1...v0.5.2) (2026-06-19)
 
 
