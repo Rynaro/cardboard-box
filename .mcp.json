@@ -11,7 +11,7 @@
         "--label",
         "eidolons.project=cardboard-box",
         "-v",
-        "/home/rynaro/.crystalium/cardboard-box:/root/.crystalium/cardboard-box",
+        "${HOME}/.crystalium/cardboard-box:/root/.crystalium/cardboard-box",
         "-e",
         "CRYSTALIUM_DATA_DIR=/root/.crystalium/cardboard-box",
         "-e",
@@ -39,9 +39,9 @@
         "-e",
         "HOME=/tmp",
         "-v",
-        "/home/rynaro/workspace/oss/cardboard-box:/repo:ro,Z",
+        "${CLAUDE_PROJECT_DIR:-.}:/repo:ro,Z",
         "-v",
-        "/home/rynaro/workspace/oss/cardboard-box/.atlas/memex:/memex:Z",
+        "${CLAUDE_PROJECT_DIR:-.}/.atlas/memex:/memex:Z",
         "--cap-drop",
         "ALL",
         "--security-opt",
@@ -55,7 +55,7 @@
       ]
     },
     "junction": {
-      "command": "/home/rynaro/.eidolons/cache/junction@0.3.0/junction",
+      "command": "${HOME}/.eidolons/cache/junction@0.3.0/junction",
       "args": [
         "mcp",
         "serve"
