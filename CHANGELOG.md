@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/Rynaro/cardboard-box/compare/v0.6.0...v0.7.0) (2026-06-19)
+
+
+### Features
+
+* **secrets:** native keyring-backed secret management ([#24](https://github.com/Rynaro/cardboard-box/issues/24)) ([d43d918](https://github.com/Rynaro/cardboard-box/commit/d43d91886032484df76b6e9bdf7912c81ee99f6a))
+
 ## [0.6.0](https://github.com/Rynaro/cardboard-box/compare/v0.5.2...v0.6.0) (2026-06-19)
 
 
