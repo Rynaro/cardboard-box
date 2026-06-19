@@ -10,6 +10,7 @@ pub mod inspect;
 pub mod list;
 pub mod output;
 pub mod rm;
+pub mod stop;
 pub mod tui_cmd;
 pub mod up;
 
@@ -116,6 +117,9 @@ pub enum Commands {
     /// Remove one or more distroboxes.
     #[command(alias = "destroy")]
     Rm(rm::RmArgs),
+
+    /// Stop one or more running distroboxes.
+    Stop(stop::StopArgs),
 
     /// Enter a distrobox (interactive).
     #[command(alias = "use")]

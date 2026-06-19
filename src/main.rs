@@ -70,6 +70,7 @@ fn dispatch(
         }
         Some(Commands::List(args)) => cli::list::run(args, backend_str, ctx, runner_ref),
         Some(Commands::Rm(args)) => cli::rm::run(args, cli.yes, backend_str, ctx, runner_ref),
+        Some(Commands::Stop(args)) => cli::stop::run(args, backend_str, ctx, runner_ref),
         Some(Commands::Enter(args)) => {
             cli::enter::run(args, cli.json, backend_str, ctx, runner_ref)
         }

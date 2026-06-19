@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use cbox::core::spec::{ApplySpec, CreateSpec, EnterSpec, RmSpec};
+use cbox::core::spec::{ApplySpec, CreateSpec, EnterSpec, RmSpec, StopSpec};
 use cbox::core::state_store::GuestStateStore;
 use cbox::dbox::backend::Backend;
 use cbox::dbox::mock::{MockMatcher, MockResponse, MockRunner};
@@ -224,7 +224,7 @@ fn ac_eff_rm_calls_distrobox_rm() {
         "should return RmDone(Ok(..))"
     );
 
-    // Verify call shape.
+    // Verify call shape: core::rm issues stop (calls[0]) then rm (calls[1]).
     let raw2 = MockRunner::new().with_default(MockResponse::ok(""));
     let spec2 = RmSpec {
         names: vec!["web-dev".to_string()],
@@ -236,10 +236,56 @@ fn ac_eff_rm_calls_distrobox_rm() {
     };
     let _ = cbox::core::rm(&spec2, &raw2);
     let calls = raw2.calls();
+    assert_eq!(calls.len(), 2, "rm should issue two calls (stop + rm)");
+    // stop call at index 0
+    assert_eq!(calls[0].program, "distrobox");
+    assert!(calls[0].args.iter().any(|a| a == "stop"));
+    // rm call at index 1
+    assert_eq!(calls[1].program, "distrobox");
+    assert!(calls[1].args.iter().any(|a| a == "rm"));
+    assert!(calls[1].args.iter().any(|a| a == "--force"));
+    assert!(!calls[1].interactive);
+}
+
+// ─── AC-EFF-STOP ─────────────────────────────────────────────────────────────
+
+#[test]
+fn ac_eff_stop_calls_distrobox_stop() {
+    let runner = MockRunner::new().with_default(MockResponse::ok(""));
+    let arc_runner = make_runner(runner);
+
+    let spec = StopSpec {
+        names: vec!["web-dev".to_string()],
+        all: false,
+        backend: Backend::Podman,
+    };
+
+    let msg = execute_effect(
+        Effect::Stop(spec),
+        &store(),
+        &arc_runner,
+        &[Backend::Podman],
+    )
+    .expect("should produce a message");
+
+    assert!(
+        matches!(msg, Message::StopDone(Ok(_))),
+        "should return StopDone(Ok(..))"
+    );
+
+    // Verify call shape via core directly.
+    let raw2 = MockRunner::new().with_default(MockResponse::ok(""));
+    let spec2 = StopSpec {
+        names: vec!["web-dev".to_string()],
+        all: false,
+        backend: Backend::Podman,
+    };
+    let _ = cbox::core::stop(&spec2, &raw2);
+    let calls = raw2.calls();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].program, "distrobox");
-    assert!(calls[0].args.iter().any(|a| a == "rm"));
-    assert!(calls[0].args.iter().any(|a| a == "--force"));
+    assert!(calls[0].args.iter().any(|a| a == "stop"));
+    assert!(calls[0].args.iter().any(|a| a == "--yes"));
     assert!(!calls[0].interactive);
 }
 

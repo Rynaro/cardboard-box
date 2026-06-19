@@ -98,6 +98,15 @@ pub struct RmSpec {
     pub backend: Backend,
 }
 
+/// Spec for `cbox stop`.
+#[derive(Debug, Clone)]
+pub struct StopSpec {
+    pub names: Vec<String>,
+    pub all: bool,
+    /// Engine the target box(es) live on — pins `distrobox` to the right backend.
+    pub backend: Backend,
+}
+
 /// Spec for `cbox enter`.
 #[derive(Debug, Clone)]
 pub struct EnterSpec {

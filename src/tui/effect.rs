@@ -6,11 +6,11 @@ use std::sync::Arc;
 
 use crate::core;
 use crate::core::spec::{
-    ApplySpec, CreateSpec, DoctorSpec, EnterSpec, InspectSpec, RmSpec, UpSpec,
+    ApplySpec, CreateSpec, DoctorSpec, EnterSpec, InspectSpec, RmSpec, StopSpec, UpSpec,
 };
 use crate::core::state_store::{GuestStateStore, ProvisionStateStore};
 use crate::dbox::runner::DistroboxRunner;
-use crate::tui::message::{CreateOutcome, Message, RmOutcome};
+use crate::tui::message::{CreateOutcome, Message, RmOutcome, StopOutcome};
 
 /// Declarative side-work descriptions.
 #[derive(Debug)]
@@ -24,6 +24,8 @@ pub enum Effect {
     Create(CreateSpec),
     /// Remove one or more boxes.
     Rm(RmSpec),
+    /// Stop one or more running boxes.
+    Stop(StopSpec),
     /// Apply a Boxfile to an existing box.
     Apply(ApplySpec),
     /// Create-if-absent then apply.
@@ -74,6 +76,12 @@ pub fn execute_effect(
         Effect::Rm(spec) => {
             let result = core::rm(&spec, runner.as_ref()).map(|o| RmOutcome { removed: o.removed });
             Some(Message::RmDone(result))
+        }
+
+        Effect::Stop(spec) => {
+            let result =
+                core::stop(&spec, runner.as_ref()).map(|o| StopOutcome { stopped: o.stopped });
+            Some(Message::StopDone(result))
         }
 
         Effect::Apply(spec) => {

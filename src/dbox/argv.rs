@@ -3,7 +3,7 @@
 
 use crate::boxfile::distro_family::detect_family;
 use crate::boxfile::docker_mode::docker_mode_flags;
-use crate::core::spec::{CreateSpec, DockerMode, EnterSpec, RmSpec};
+use crate::core::spec::{CreateSpec, DockerMode, EnterSpec, RmSpec, StopSpec};
 
 /// Build the argv for `distrobox create` (not including the program name itself).
 /// Pure function: given a `CreateSpec`, returns a deterministic `Vec<String>`.
@@ -113,6 +113,18 @@ pub fn build_rm_argv(spec: &RmSpec) -> Vec<String> {
     if spec.rm_home {
         args.push("--rm-home".into());
     }
+    if spec.all {
+        args.push("--all".into());
+    }
+    for name in &spec.names {
+        args.push(name.clone());
+    }
+    args
+}
+
+/// Build the argv for `distrobox stop`.
+pub fn build_stop_argv(spec: &StopSpec) -> Vec<String> {
+    let mut args = vec!["stop".to_string(), "--yes".to_string()];
     if spec.all {
         args.push("--all".into());
     }
