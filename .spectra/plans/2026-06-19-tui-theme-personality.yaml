@@ -1,0 +1,256 @@
+spec_id: "2026-06-19-tui-theme-personality"
+title: "cbox TUI personality + theme foundation"
+intent: REQUEST_CHANGE
+direction_locked: true
+complexity: 8
+tier: standard
+confidence: 0.87
+decision: AUTO_PROCEED
+coder: vivi
+build_constraint: "CONTAINERIZED — never run host cargo; use make targets only. `tui` feature is default-on (Cargo.toml:17)."
+
+aesthetic:
+  locked: true
+  direction: "playful / retro — heavy box-drawing, ASCII wordmark, characterful badges"
+  voice_rule: "show don't tell — never advertise cozy/beautiful/friendly/delightful; demonstrate via layout, glyphs, concrete wording"
+
+scope:
+  in:
+    - "src/tui/theme.rs: ColorMode + Theme + resolve + token table (replaces ALL inline styling)"
+    - "src/tui/strings.rs: centralized user-facing copy"
+    - "reusable state-badge component (status -> glyph+label+style)"
+    - "brand header strip (logo+wordmark+tagline), collapsible by width, List-only, NO splash"
+    - "restyle all 6 screens + status bar against tokens"
+    - "richer empty/loading/error states"
+    - "NO_COLOR + --no-color + 16-color + true/256 resolution (port cli/output.rs:14-23)"
+    - "new unit tests for theme/badge/header/copy (pure helpers only; no golden frame)"
+  out:
+    - "About/Splash screen"
+    - "animated transitions"
+    - "responsive/small-terminal reflow beyond the single header-collapse rule"
+  untouched: ["effect.rs", "message.rs", "reducer logic", "keybindings", "worker thread"]
+
+threading:
+  decision: "by-ref Theme, no global"
+  color_mode_compute: "once in app::run after backends resolved (app.rs:320-329), stored as new Model.color_mode field"
+  theme_build: "let theme = Theme::resolve(model.color_mode) at top of view() (view.rs:19); pass &theme into each render_* fn"
+  model_change: "ADD color_mode field with default in Model::new; DO NOT change Model::new signature (preserves tui_update.rs:16)"
+
+color_modes:
+  enum: ["TrueColor", "Ansi16", "NoColor"]
+  detect_rule:
+    no_color_when: "no_color_flag OR env NO_COLOR set OR !stdout.is_terminal()  (ports cli/output.rs:14-23)"
+    ansi16_when: "COLORTERM not in {truecolor,24bit} AND TERM not matching *-256color/*-direct"
+    truecolor_else: true
+  testable_seam: "detect_from(no_color_flag, no_color_env, is_tty, term, colorterm) pure core + thin detect() wrapper"
+  no_color_invariant_P0: "in NoColor mode NO style carries any fg/bg color; differentiation only via Modifier (BOLD/DIM/REVERSED)"
+
+tokens:
+  accent:        { truecolor: "Rgb(214,158,92)", ansi16: Yellow,   nocolor: "default+BOLD" }
+  accent_dim:    { truecolor: "Rgb(150,110,66)", ansi16: DarkGray, nocolor: "default" }
+  success:       { truecolor: "Rgb(126,184,108)", ansi16: Green,   nocolor: "default+BOLD" }
+  warning:       { truecolor: "Rgb(214,138,70)", ansi16: Yellow,   nocolor: "default+BOLD" }
+  danger:        { truecolor: "Rgb(200,86,74)",  ansi16: Red,      nocolor: "default+BOLD" }
+  muted:         { truecolor: "Rgb(128,128,128)", ansi16: DarkGray, nocolor: "default+DIM" }
+  border:        { truecolor: "Rgb(150,110,66)", ansi16: DarkGray, nocolor: "default" }
+  border_focus:  { truecolor: "Rgb(214,158,92)", ansi16: Yellow,   nocolor: "default+BOLD" }
+  title:         { truecolor: "Rgb(214,158,92)+BOLD", ansi16: "Yellow+BOLD", nocolor: "default+BOLD" }
+  selection:     { truecolor: "bg Rgb(60,46,30)/fg Rgb(235,222,200)+BOLD", ansi16: "bg Blue/fg White+BOLD", nocolor: "REVERSED+BOLD" }
+  header_cell:   { truecolor: "accent+BOLD", ansi16: "Yellow+BOLD", nocolor: "default+BOLD" }
+  brand_logo:    { ref: accent }
+  brand_name:    { ref: "accent+BOLD" }
+  brand_tagline: { ref: muted }
+  badge_running: { ref: success }
+  badge_stopped: { ref: muted }
+  badge_error:   { ref: danger }
+  badge_unknown: { ref: accent_dim }
+
+strings_module:
+  decision: "CENTRALIZE in src/tui/strings.rs (consts + small fn formatters; NOT i18n)"
+  brand:
+    WORDMARK: "cardboard-box"
+    TAGLINE: "Your Linux environments, unboxed."
+    LOGO_GLYPH: "▣"
+  states:
+    EMPTY_LIST: "Nothing boxed up yet.  Press  c  to pack your first one."
+    EMPTY_DETAIL: "No box selected."
+    LOADING_LIST: "Unpacking your boxes…"
+    LOADING_DETAIL: "Opening the box…"
+    LOADING_DOCTOR: "Running a check-up…"
+    PROGRESS_RUNNING: "Working…"
+    PROGRESS_DONE: "All set.  Enter or Esc to head back."
+    ERROR_PREFIX: "✗ "
+    HELP: "↑↓ move · enter open · c create · s stop · d destroy · a apply · e edit · ? doctor · q quit"
+  copy_rewrites:
+    - { where: "view.rs:54 empty list", old: "No boxes yet. Press 'c' to create your first one.", new: "Nothing boxed up yet.  Press  c  to pack your first one." }
+    - { where: "update.rs:658 list loaded", old: "{n} box(es) loaded", new: "{n} box(es) packed and ready" }
+    - { where: "update.rs:670 backend unreachable", old: "Can't reach backend — running doctor…", new: "Backend's gone quiet — running a check-up…" }
+    - { where: "view.rs:140 detail loading", old: "{spinner} Loading…", new: "{spinner} Opening the box…" }
+    - { where: "view.rs:464 doctor loading", old: "{spinner} Running doctor…", new: "{spinner} Running a check-up…" }
+    - { where: "view.rs:399 progress running", old: "{spinner} Running…", new: "{spinner} Working…" }
+    - { where: "view.rs:409 progress done", old: "Done. Press Enter or Esc to return.", new: "All set.  Enter or Esc to head back." }
+    - { where: "update.rs:707 created", old: 'Created "{name}"', new: 'Packed "{name}".' }
+    - { where: "update.rs:730 removed", old: "Removed: {list}", new: "Cleared out: {list}" }
+    - { where: "update.rs:753 stopped", old: "Stopped: {list}", new: "Sealed up: {list}" }
+    - { where: "view.rs:149 detail empty", old: "No detail loaded.", new: "No box selected." }
+  banned_substrings: ["cozy", "beautiful", "friendly", "delightful", "cute", "lovely"]
+
+badge_component:
+  classify_status_pure: |
+    Running  if contains running|up
+    Stopped  if contains exit|stopped|created
+    Error    if contains error|dead
+    Unknown  else
+  presentation:
+    Running: { glyph: "●", label: "up",      style: badge_running }
+    Stopped: { glyph: "○", label: "sealed",  style: badge_stopped }
+    Error:   { glyph: "✗", label: "trouble", style: badge_error }
+    Unknown: { glyph: "·", label: "unknown", style: badge_unknown }
+  preserves: "existing running/up->green else dim semantics (view.rs:87-93, view.rs:167)"
+
+brand_header:
+  placement: "List screen only; 3-region vertical split [header(Length 1), body(Min 3), status(Length 1)]; other screens keep 2-region split (view.rs:23-26)"
+  collapse_width: 60
+  collapse_helper_pure: "header_should_collapse(width) -> width < 60"
+  wide: "▣ cardboard-box · Your Linux environments, unboxed."
+  narrow: "▣ cardboard-box"
+  computed_from: "per-frame Rect.width, NOT resize events (Resize stays no-op update.rs:38)"
+
+screens:
+  list:        { anchor: "view.rs:47-128",  border: "Thick/theme.border", title: " your boxes ", selection: theme.selection, status_col: "badge component", empty: strings.EMPTY_LIST, loading: "spinner + LOADING_LIST" }
+  detail:      { anchor: "view.rs:132-229", border: "Thick/theme.border", labels: theme.header_cell, status: "badge component", loading: LOADING_DETAIL, empty: EMPTY_DETAIL }
+  wizard:      { anchor: "view.rs:233-323", border: "Thick/theme.accent", active_step: theme.success, hint: theme.muted, value_fg: default }
+  confirm:     { anchor: "view.rs:327-366", border: "Double/theme.danger", yes_no: "y=danger / n=success two-span", geometry: unchanged }
+  progress:    { anchor: "view.rs:370-449", border: "Thick/theme.accent", step_status: "ran|copied=success, skipped=muted, failed=danger", running: PROGRESS_RUNNING, done: PROGRESS_DONE }
+  doctor:      { anchor: "view.rs:453-532", border: "Thick/theme.warning", ok_glyph: "✓=success / ✗=danger helper", loading: LOADING_DOCTOR }
+  status_bar:  { anchor: "view.rs:536-558", idle: "HELP/muted", busy: "spinner+msg/accent", ok: "msg · help/success", error: "ERROR_PREFIX+msg/danger" }
+
+acceptance_criteria:
+  - id: AC-THEME-1
+    given: "ColorMode::detect_from with no_color_flag=true | NO_COLOR env | non-tty"
+    then: "returns NoColor in each case"
+  - id: AC-THEME-2
+    given: "Theme::resolve(TrueColor) and resolve(Ansi16)"
+    then: "accent.fg == Rgb(214,158,92) for TrueColor; == Yellow for Ansi16"
+  - id: AC-THEME-3
+    p0: true
+    given: "Theme::resolve(NoColor)"
+    then: "EVERY style field has fg.is_none() && bg.is_none(); only Modifier differentiates"
+  - id: AC-BADGE-1
+    given: "classify_status on running|'Up 3 minutes'|'exited (0)'|created|dead|weird"
+    then: "Running|Running|Stopped|Stopped|Error|Unknown"
+  - id: AC-BADGE-2
+    given: "each BadgeKind"
+    then: "glyph/label/style match the presentation table"
+  - id: AC-HEADER-1
+    given: "header_should_collapse(59|60|120)"
+    then: "true|false|false"
+  - id: AC-COPY-1
+    given: "every public copy const in strings.rs"
+    then: "non-empty AND contains no banned substring (case-insensitive)"
+  - id: AC-COPY-2
+    given: "strings::loaded(2), created(\"web\")"
+    then: "contain '2' and 'web' respectively; non-empty"
+  - id: AC-REGRESSION
+    given: "existing tests/tui_update.rs + tests/tui_effects.rs"
+    then: "ALL pass unchanged (assert variants/state, not text/colors)"
+  test_file: "tests/tui_theme.rs (new, #![cfg(feature = \"tui\")])"
+
+stories:
+  - id: T1
+    agent: vivi
+    title: "theme.rs — ColorMode, detect_from/detect, Theme, resolve, token table"
+    timebox: "<=2d"
+    depends: []
+    files: ["src/tui/theme.rs (new)", "src/tui/mod.rs (+mod)"]
+    acceptance: [AC-THEME-1, AC-THEME-2, AC-THEME-3]
+    verifier: "make build; make test"
+    pattern: "ADAPT cli/output.rs:14-27 color gate into ratatui Styles"
+  - id: T2
+    agent: vivi
+    title: "badge component — BadgeKind, classify_status, badge_span, ok_glyph"
+    timebox: "<=1d"
+    depends: [T1]
+    files: ["src/tui/theme.rs OR src/tui/badge.rs"]
+    acceptance: [AC-BADGE-1, AC-BADGE-2]
+    verifier: "make test"
+  - id: T3
+    agent: kupo
+    title: "strings.rs — consts + formatters"
+    timebox: "1d"
+    depends: []
+    files: ["src/tui/strings.rs (new)", "src/tui/mod.rs (+mod)"]
+    acceptance: [AC-COPY-1, AC-COPY-2]
+    verifier: "make build; make test"
+    note: "flat const module, no logic — Kupo micro-task"
+  - id: T4
+    agent: vivi
+    title: "thread theme+color_mode: Model.color_mode field, compute in app.rs, build Theme in view(), pass &theme"
+    timebox: "<=1d"
+    depends: [T1]
+    files: ["src/tui/model.rs (+field, defaulted)", "src/tui/app.rs:320-329", "src/tui/view.rs:19-43"]
+    acceptance: [AC-REGRESSION]
+    verifier: "make build; make test"
+    note: "Model::new signature MUST stay unchanged (R5)"
+  - id: T5
+    agent: vivi
+    title: "brand header + List 3-region split + collapse helper; restyle List + Detail"
+    timebox: "<=2d"
+    depends: [T1, T2, T3, T4]
+    files: ["src/tui/view.rs:19-229"]
+    acceptance: [AC-HEADER-1]
+    verifier: "make build; manual smoke"
+  - id: T6
+    agent: vivi
+    title: "restyle Wizard, ConfirmDestroy, Progress, Doctor, status bar; wire --no-color if plumbed"
+    timebox: "<=2d"
+    depends: [T1, T2, T3, T4]
+    files: ["src/tui/view.rs:233-558"]
+    acceptance: []
+    verifier: "make build; manual smoke; no-color/16-color smoke"
+  - id: T7
+    agent: kupo
+    title: "move status-string copy from update.rs into strings::* calls"
+    timebox: "1d"
+    depends: [T3]
+    files: ["src/tui/update.rs:658,670,688,707,730,753,771"]
+    acceptance: [AC-REGRESSION]
+    verifier: "make test (regression MUST stay green)"
+    note: "mechanical string-source swap, no logic change — Kupo micro-task"
+  - id: T8
+    agent: vivi
+    title: "tests/tui_theme.rs — implement all theme/badge/header/copy ACs"
+    timebox: "<=1d"
+    depends: [T1, T2, T3]
+    files: ["tests/tui_theme.rs (new)"]
+    acceptance: [AC-THEME-1, AC-THEME-2, AC-THEME-3, AC-BADGE-1, AC-BADGE-2, AC-HEADER-1, AC-COPY-1, AC-COPY-2]
+    verifier: "make test"
+
+execution_plan:
+  parallel_start: [T1, T3]
+  sequence: "T1 -> {T2, T4} ; T3 -> T7 ; {T2,T3,T4} -> {T5,T6} ; {T1,T2,T3} -> T8"
+  final_gate: "make check (fmt-check + lint + lint-lean + build + release + test)"
+
+risks:
+  - { id: R1, risk: "copy move breaks a hidden text assertion", mit: "AC-REGRESSION; existing tests assert variants not text (tui_update.rs:116,196,585)" }
+  - { id: R2, risk: "no-color leaks color (P0)", mit: "AC-THEME-3 asserts fg/bg None for every field; NO_COLOR=1 smoke" }
+  - { id: R3, risk: "16-color unreadable RGB downgrade", mit: "explicit Ansi16 named column; TERM=xterm COLORTERM= smoke" }
+  - { id: R4, risk: "header crowds list on small terms", mit: "1 row, List-only, collapse <60 cols (AC-HEADER-1)" }
+  - { id: R5, risk: "color_mode field breaks Model::new callers", mit: "field defaulted in new; signature unchanged; tui_update.rs:16 compiles" }
+  - { id: R6, risk: "box-drawing glyphs as tofu", mit: "ratatui built-in BorderType::Thick/Double + single-cell glyphs proven in-repo (view.rs:219,259,481)" }
+  - { id: R7, risk: "host cargo run violates containerized build", mit: "every verifier names a make target, never cargo" }
+
+verification_gates:
+  - "make fmt-check"
+  - "make lint"
+  - "make lint-lean"
+  - "make build  (tui default feature)"
+  - "make test   (incl new tui_theme.rs + unchanged tui_update.rs/tui_effects.rs)"
+  - "make check  (full release chain)"
+  no_color_smoke: "NO_COLOR=1 cbox -> bold/dim/glyph-only, zero color"
+  ansi16_smoke: "TERM=xterm COLORTERM= cbox -> 16-color named palette"
+  truecolor_smoke: "modern terminal -> kraft RGB palette; tagline drops below ~60 cols"
+
+open_flags:
+  - "--no-color NOT wired into TUI launch today; NO_COLOR env + TTY gate cover the requirement. Confirm whether to thread explicit --no-color into the cbox TUI subcommand this pass."
+  - "kraft RGB values are a defensible start; tweak-friendly (single table)."

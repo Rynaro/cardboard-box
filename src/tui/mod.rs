@@ -13,6 +13,8 @@ pub mod effect;
 pub mod message;
 #[cfg(feature = "tui")]
 pub mod model;
+pub mod strings;
+pub mod theme;
 #[cfg(feature = "tui")]
 pub mod update;
 #[cfg(feature = "tui")]
