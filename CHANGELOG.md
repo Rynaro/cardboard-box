@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/Rynaro/cardboard-box/compare/v0.7.0...v0.8.0) (2026-06-19)
+
+
+### Features
+
+* **tui:** themed retro UI with brand header and no-color fallback ([#28](https://github.com/Rynaro/cardboard-box/issues/28)) ([5d43eb4](https://github.com/Rynaro/cardboard-box/commit/5d43eb4148c725295360209be69c3880745b975f))
+
 ## [0.7.0](https://github.com/Rynaro/cardboard-box/compare/v0.6.0...v0.7.0) (2026-06-19)
 
 
