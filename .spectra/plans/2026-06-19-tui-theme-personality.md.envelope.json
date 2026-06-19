@@ -1,0 +1,25 @@
+{
+  "envelope_version": "1.0",
+  "message_id": "4e624210-885c-4222-8f4a-0d06f7b09bb2",
+  "thread_id": "35cad3be-4e7a-4f6a-9fe9-a0c92910cf78",
+  "from": "spectra",
+  "to": "apivr",
+  "performative": "PROPOSE",
+  "edge_origin": "roster",
+  "created_at": "2026-06-19T22:47:35Z",
+  "trust_level": "standard",
+  "artifact": {
+    "kind": "spec",
+    "path": ".spectra/plans/2026-06-19-tui-theme-personality.md",
+    "title": "cbox TUI personality + theme foundation"
+  },
+  "integrity": {
+    "method": "sha256",
+    "value": "66faab196a7c01b0ac21d05830b8fa40ae034be2e0bdd2e683b02b336e7afda9"
+  },
+  "required_sections": ["stories", "validation_gates", "agent_hints", "given_when_then"],
+  "sidecars": [
+    ".spectra/plans/2026-06-19-tui-theme-personality.yaml",
+    ".spectra/plans/2026-06-19-tui-theme-personality.state.json"
+  ]
+}

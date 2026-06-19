@@ -15,6 +15,7 @@ use crate::tui::message::{Key, Message};
 use crate::tui::model::{
     ConfirmState, Model, ProgressState, Screen, StatusLine, WizardState, WizardStep,
 };
+use crate::tui::strings;
 
 /// Resolve a box's engine from its stored backend string, falling back to the
 /// create default when it's missing/unknown (e.g. mock rows in tests).
@@ -655,7 +656,7 @@ fn handle_list_loaded(
             if model.selected.is_none() && !model.boxes.is_empty() {
                 model.selected = Some(0);
             }
-            model.status = StatusLine::Ok(format!("{} box(es) loaded", model.boxes.len()));
+            model.status = StatusLine::Ok(strings::loaded(model.boxes.len()));
             vec![]
         }
         Err(e) => {
@@ -666,8 +667,7 @@ fn handle_list_loaded(
             if is_tempfail {
                 model.screen = Screen::DoctorPanel;
                 model.busy = true;
-                model.status =
-                    StatusLine::Busy("Can't reach backend — running doctor…".to_string());
+                model.status = StatusLine::Busy(strings::backend_unreachable().to_string());
                 vec![Effect::Doctor(DoctorSpec {
                     backend_override: None,
                 })]
@@ -704,7 +704,7 @@ fn handle_create_done(
     model.busy = false;
     match result {
         Ok(outcome) => {
-            model.status = StatusLine::Ok(format!("Created \"{}\"", outcome.name));
+            model.status = StatusLine::Ok(strings::created(&outcome.name));
             model.screen = Screen::List;
             model.progress = None;
             // Refresh the list.
@@ -727,7 +727,7 @@ fn handle_rm_done(
     model.busy = false;
     match result {
         Ok(outcome) => {
-            model.status = StatusLine::Ok(format!("Removed: {}", outcome.removed.join(", ")));
+            model.status = StatusLine::Ok(strings::removed(&outcome.removed.join(", ")));
             model.screen = Screen::List;
             model.progress = None;
             model.selected = None;
@@ -750,7 +750,7 @@ fn handle_stop_done(
     model.busy = false;
     match result {
         Ok(outcome) => {
-            model.status = StatusLine::Ok(format!("Stopped: {}", outcome.stopped.join(", ")));
+            model.status = StatusLine::Ok(strings::stopped(&outcome.stopped.join(", ")));
             model.busy = true;
             vec![Effect::LoadList]
         }
@@ -768,9 +768,11 @@ fn handle_apply_done(
     model.busy = false;
     match result {
         Ok(outcome) => {
-            model.status = StatusLine::Ok(format!(
-                "Applied \"{}\": {} ran, {} skipped, {} failed",
-                outcome.name, outcome.summary.ran, outcome.summary.skipped, outcome.summary.failed
+            model.status = StatusLine::Ok(strings::applied(
+                &outcome.name,
+                outcome.summary.ran,
+                outcome.summary.skipped,
+                outcome.summary.failed,
             ));
             if let Some(ref mut p) = model.progress {
                 p.steps = outcome.steps;

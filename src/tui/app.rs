@@ -323,10 +323,15 @@ mod inner {
         let (_guard, mut terminal) = TerminalGuard::new()
             .map_err(|e| CboxError::ioerr(format!("Terminal setup failed: {e}")))?;
 
+        // Detect color capability once at launch and thread it through the model.
+        // The TUI has no explicit --no-color flag today; NO_COLOR env + TTY gate suffice.
+        let color_mode = crate::tui::theme::detect(false);
+
         // backends is non-empty (Backend::usable guarantees it); [0] is the
         // preferred engine used as the default for creating new boxes.
         let mut model = Model::new(backends[0].clone());
         model.backends = backends;
+        model.color_mode = color_mode;
 
         run_loop(model, runner, &mut terminal)
     }

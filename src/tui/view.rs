@@ -6,52 +6,120 @@
 mod inner {
     use ratatui::{
         layout::{Alignment, Constraint, Direction, Layout},
-        style::{Color, Modifier, Style},
+        style::{Modifier, Style},
         text::{Line, Span},
-        widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, Wrap},
+        widgets::{Block, BorderType, Borders, Cell, Clear, Paragraph, Row, Table, Wrap},
         Frame,
     };
 
     use crate::tui::model::{Model, Screen, StatusLine, WizardStep};
+    use crate::tui::strings;
+    use crate::tui::theme::{badge_span, header_should_collapse, ok_glyph, Theme};
 
     const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
     pub fn view(model: &Model, frame: &mut Frame) {
         let area = frame.area();
+        // Build theme once per frame from the model's detected color mode.
+        let theme = Theme::resolve(model.color_mode);
 
-        // Split: main body + status bar.
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(3), Constraint::Length(1)])
-            .split(area);
+        if model.screen == Screen::List {
+            // List screen gets a 3-region vertical split: header | body | status.
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Min(3),
+                    Constraint::Length(1),
+                ])
+                .split(area);
 
-        // Render the active screen.
-        match model.screen {
-            Screen::List => render_list(model, frame, chunks[0]),
-            Screen::Detail => render_detail(model, frame, chunks[0]),
-            Screen::Wizard => render_wizard(model, frame, chunks[0]),
-            Screen::ConfirmDestroy => {
-                render_list(model, frame, chunks[0]);
-                render_confirm_destroy(model, frame, chunks[0]);
+            render_brand_header(frame, chunks[0], area.width, &theme);
+            render_list(model, frame, chunks[1], &theme);
+            render_status_bar(model, frame, chunks[2], &theme);
+        } else {
+            // All other screens: 2-region split (body | status).
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(3), Constraint::Length(1)])
+                .split(area);
+
+            match model.screen {
+                Screen::List => unreachable!(),
+                Screen::Detail => render_detail(model, frame, chunks[0], &theme),
+                Screen::Wizard => render_wizard(model, frame, chunks[0], &theme),
+                Screen::ConfirmDestroy => {
+                    render_list(model, frame, chunks[0], &theme);
+                    render_confirm_destroy(model, frame, chunks[0], &theme);
+                }
+                Screen::Progress => render_progress(model, frame, chunks[0], &theme),
+                Screen::DoctorPanel => render_doctor(model, frame, chunks[0], &theme),
             }
-            Screen::Progress => render_progress(model, frame, chunks[0]),
-            Screen::DoctorPanel => render_doctor(model, frame, chunks[0]),
-        }
 
-        // Status bar always at bottom.
-        render_status_bar(model, frame, chunks[1]);
+            render_status_bar(model, frame, chunks[1], &theme);
+        }
+    }
+
+    // ─── Brand header ──────────────────────────────────────────────────────────
+
+    fn render_brand_header(
+        frame: &mut Frame,
+        area: ratatui::layout::Rect,
+        width: u16,
+        theme: &Theme,
+    ) {
+        let line = if header_should_collapse(width) {
+            // Narrow: logo + wordmark only.
+            Line::from(vec![
+                Span::styled(strings::LOGO_GLYPH, theme.brand_logo),
+                Span::raw(" "),
+                Span::styled(strings::WORDMARK, theme.brand_name),
+            ])
+        } else {
+            // Wide: logo + wordmark + separator + tagline.
+            Line::from(vec![
+                Span::styled(strings::LOGO_GLYPH, theme.brand_logo),
+                Span::raw(" "),
+                Span::styled(strings::WORDMARK, theme.brand_name),
+                Span::raw(" "),
+                Span::styled("·", theme.muted),
+                Span::raw(" "),
+                Span::styled(strings::TAGLINE, theme.brand_tagline),
+            ])
+        };
+        let p = Paragraph::new(line);
+        frame.render_widget(p, area);
     }
 
     // ─── Box list ─────────────────────────────────────────────────────────────
 
-    fn render_list(model: &Model, frame: &mut Frame, area: ratatui::layout::Rect) {
+    fn render_list(model: &Model, frame: &mut Frame, area: ratatui::layout::Rect, theme: &Theme) {
         let block = Block::default()
-            .title("  cbox — your boxes  ")
+            .title(Span::styled(" your boxes ", theme.title))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan));
+            .border_type(BorderType::Thick)
+            .border_style(theme.border);
+
+        if model.busy && model.boxes.is_empty() {
+            let spinner = SPINNER_FRAMES[model.spinner_tick % SPINNER_FRAMES.len()];
+            let msg = Paragraph::new(Span::styled(
+                format!("{spinner} {}", strings::LOADING_LIST),
+                theme.accent,
+            ))
+            .block(block)
+            .alignment(Alignment::Center);
+            frame.render_widget(msg, area);
+            return;
+        }
 
         if model.boxes.is_empty() && !model.busy {
-            let msg = Paragraph::new("No boxes yet. Press 'c' to create your first one.")
+            // Two-span empty state: sentence + highlighted key.
+            let empty_line = Line::from(vec![
+                Span::styled("Nothing boxed up yet.  Press  ", theme.muted),
+                Span::styled("c", theme.accent),
+                Span::styled("  to pack your first one.", theme.muted),
+            ]);
+            let msg = Paragraph::new(empty_line)
                 .block(block)
                 .alignment(Alignment::Center)
                 .wrap(Wrap { trim: true });
@@ -60,14 +128,13 @@ mod inner {
         }
 
         let header = Row::new(vec![
-            Cell::from("NAME").style(Style::default().add_modifier(Modifier::BOLD)),
-            Cell::from("BACKEND").style(Style::default().add_modifier(Modifier::BOLD)),
-            Cell::from("STATUS").style(Style::default().add_modifier(Modifier::BOLD)),
-            Cell::from("IMAGE").style(Style::default().add_modifier(Modifier::BOLD)),
-            Cell::from("DOCKER").style(Style::default().add_modifier(Modifier::BOLD)),
-            Cell::from("CBOX?").style(Style::default().add_modifier(Modifier::BOLD)),
-        ])
-        .style(Style::default().fg(Color::Yellow));
+            Cell::from("NAME").style(theme.header_cell),
+            Cell::from("BACKEND").style(theme.header_cell),
+            Cell::from("STATUS").style(theme.header_cell),
+            Cell::from("IMAGE").style(theme.header_cell),
+            Cell::from("DOCKER").style(theme.header_cell),
+            Cell::from("CBOX?").style(theme.header_cell),
+        ]);
 
         let rows: Vec<Row> = model
             .boxes
@@ -75,21 +142,18 @@ mod inner {
             .enumerate()
             .map(|(i, b)| {
                 let is_selected = model.selected == Some(i);
-                let style = if is_selected {
-                    Style::default()
-                        .bg(Color::Blue)
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD)
+                let row_style = if is_selected {
+                    theme.selection
                 } else {
                     Style::default()
                 };
 
-                let status_style = if b.status.to_lowercase().contains("running")
-                    || b.status.to_lowercase().contains("up")
-                {
-                    Style::default().fg(Color::Green)
+                let status_span = if is_selected {
+                    // On selected row the row_style already drives bg/fg — just use the
+                    // badge glyph+label without overriding color so selection stands out.
+                    badge_span(&b.status, theme)
                 } else {
-                    Style::default().fg(Color::DarkGray)
+                    badge_span(&b.status, theme)
                 };
 
                 let cbox_str = if b.cbox_managed { "yes" } else { "no" };
@@ -97,16 +161,16 @@ mod inner {
                 Row::new(vec![
                     Cell::from(b.name.clone()),
                     Cell::from(b.backend.clone()),
-                    Cell::from(b.status.clone()).style(if is_selected {
-                        style
+                    Cell::from(status_span.content.to_string()).style(if is_selected {
+                        row_style
                     } else {
-                        status_style
+                        status_span.style
                     }),
                     Cell::from(b.image.clone()),
                     Cell::from(b.docker_mode.clone()),
                     Cell::from(cbox_str),
                 ])
-                .style(style)
+                .style(row_style)
             })
             .collect();
 
@@ -129,24 +193,28 @@ mod inner {
 
     // ─── Detail panel ─────────────────────────────────────────────────────────
 
-    fn render_detail(model: &Model, frame: &mut Frame, area: ratatui::layout::Rect) {
+    fn render_detail(model: &Model, frame: &mut Frame, area: ratatui::layout::Rect, theme: &Theme) {
         let block = Block::default()
-            .title("  Box Detail  ")
+            .title(Span::styled(" box detail ", theme.title))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan));
+            .border_type(BorderType::Thick)
+            .border_style(theme.border);
 
         if model.busy {
             let spinner = SPINNER_FRAMES[model.spinner_tick % SPINNER_FRAMES.len()];
-            let p = Paragraph::new(format!("{spinner} Loading…"))
-                .block(block)
-                .alignment(Alignment::Center);
+            let p = Paragraph::new(Span::styled(
+                format!("{spinner} {}", strings::LOADING_DETAIL),
+                theme.accent,
+            ))
+            .block(block)
+            .alignment(Alignment::Center);
             frame.render_widget(p, area);
             return;
         }
 
         let content = match &model.detail {
             None => {
-                let p = Paragraph::new("No detail loaded.")
+                let p = Paragraph::new(Span::styled(strings::EMPTY_DETAIL, theme.muted))
                     .block(block)
                     .alignment(Alignment::Center);
                 frame.render_widget(p, area);
@@ -155,44 +223,39 @@ mod inner {
             Some(d) => d,
         };
 
+        let status_span = badge_span(&content.status, theme);
+
         let mut lines = vec![
             Line::from(vec![
-                Span::styled("Name:     ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled("Name:     ", theme.header_cell),
                 Span::raw(content.name.clone()),
             ]),
             Line::from(vec![
-                Span::styled("Status:   ", Style::default().add_modifier(Modifier::BOLD)),
-                Span::styled(
-                    content.status.clone(),
-                    if content.status.to_lowercase().contains("running") {
-                        Style::default().fg(Color::Green)
-                    } else {
-                        Style::default().fg(Color::DarkGray)
-                    },
-                ),
+                Span::styled("Status:   ", theme.header_cell),
+                status_span,
             ]),
             Line::from(vec![
-                Span::styled("Image:    ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled("Image:    ", theme.header_cell),
                 Span::raw(content.image.clone()),
             ]),
             Line::from(vec![
-                Span::styled("Created:  ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled("Created:  ", theme.header_cell),
                 Span::raw(content.created.clone()),
             ]),
             Line::from(vec![
-                Span::styled("Docker:   ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled("Docker:   ", theme.header_cell),
                 Span::raw(content.docker_mode.clone()),
             ]),
             Line::from(vec![
-                Span::styled("Backend:  ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled("Backend:  ", theme.header_cell),
                 Span::raw(content.backend.clone()),
             ]),
             Line::from(vec![
-                Span::styled("ID:       ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled("ID:       ", theme.header_cell),
                 Span::raw(content.id.clone()),
             ]),
             Line::from(vec![
-                Span::styled("Boxfile:  ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled("Boxfile:  ", theme.header_cell),
                 Span::raw(
                     content
                         .boxfile_path
@@ -204,21 +267,19 @@ mod inner {
 
         if !content.packages.is_empty() {
             lines.push(Line::from(vec![
-                Span::styled("Packages: ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled("Packages: ", theme.header_cell),
                 Span::raw(content.packages.join(", ")),
             ]));
         }
 
         if !content.mounts.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "Mounts:",
-                Style::default().add_modifier(Modifier::BOLD),
-            )));
+            lines.push(Line::from(Span::styled("Mounts:", theme.header_cell)));
             for m in &content.mounts {
-                lines.push(Line::from(format!(
-                    "  {}  →  {}  ({})",
-                    m.host, m.guest, m.mode
-                )));
+                lines.push(Line::from(vec![
+                    Span::raw(format!("  {}  ", m.host)),
+                    Span::styled("→", theme.muted),
+                    Span::raw(format!("  {}  ({})", m.guest, m.mode)),
+                ]));
             }
         }
 
@@ -230,7 +291,7 @@ mod inner {
 
     // ─── Create wizard ────────────────────────────────────────────────────────
 
-    fn render_wizard(model: &Model, frame: &mut Frame, area: ratatui::layout::Rect) {
+    fn render_wizard(model: &Model, frame: &mut Frame, area: ratatui::layout::Rect, theme: &Theme) {
         let wizard = match &model.wizard {
             Some(w) => w,
             None => return,
@@ -245,6 +306,18 @@ mod inner {
             WizardStep::Confirm => 4,
         };
 
+        // Build step indicator as spans: active step in success style, inactive in muted.
+        let mut step_spans: Vec<Span> = Vec::new();
+        for (i, s) in steps.iter().enumerate() {
+            if i > 0 {
+                step_spans.push(Span::styled(" › ", theme.muted));
+            }
+            if i == current_step_idx {
+                step_spans.push(Span::styled(format!("[{s}]"), theme.success));
+            } else {
+                step_spans.push(Span::styled(s.to_string(), theme.muted));
+            }
+        }
         let step_indicator: String = steps
             .iter()
             .enumerate()
@@ -259,9 +332,13 @@ mod inner {
             .join(" › ");
 
         let block = Block::default()
-            .title(format!("  Create Box — {step_indicator}  "))
+            .title(Span::styled(
+                format!("  pack a box — {step_indicator}  "),
+                theme.title,
+            ))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green));
+            .border_type(BorderType::Thick)
+            .border_style(theme.accent);
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -312,19 +389,29 @@ mod inner {
             }
         };
 
-        let field = Paragraph::new(format!("{label}\n{value}"))
-            .style(Style::default().fg(Color::White))
-            .wrap(Wrap { trim: false });
+        // Render label in header_cell style; value in default fg.
+        let field_line = Line::from(vec![
+            Span::styled(format!("{label}\n"), theme.header_cell),
+            Span::raw(value),
+        ]);
+        let field = Paragraph::new(field_line).wrap(Wrap { trim: false });
         frame.render_widget(field, chunks[1]);
 
-        let hint = Paragraph::new("Tab/Enter: next  |  Shift-Tab: back  |  Esc: cancel")
-            .style(Style::default().fg(Color::DarkGray));
+        let hint = Paragraph::new(Span::styled(
+            "Tab/Enter: next  |  Shift-Tab: back  |  Esc: cancel",
+            theme.muted,
+        ));
         frame.render_widget(hint, chunks[2]);
     }
 
     // ─── Confirm destroy modal ────────────────────────────────────────────────
 
-    fn render_confirm_destroy(model: &Model, frame: &mut Frame, area: ratatui::layout::Rect) {
+    fn render_confirm_destroy(
+        model: &Model,
+        frame: &mut Frame,
+        area: ratatui::layout::Rect,
+        theme: &Theme,
+    ) {
         let confirm = match &model.confirm {
             Some(c) => c,
             None => return,
@@ -345,38 +432,59 @@ mod inner {
         frame.render_widget(Clear, modal_area);
 
         let rm_home_indicator = if confirm.rm_home { "[x]" } else { "[ ]" };
-        let text = format!(
-            "Destroy \"{}\"?\n\n\
-             Its $HOME is preserved unless you also remove it.\n\
-             {rm_home_indicator} h: also remove $HOME\n\n\
-             [y]es / [n]o",
-            confirm.name
+
+        // Build styled content lines.
+        let danger_title = Span::styled(
+            " confirm destroy ",
+            theme.danger.add_modifier(Modifier::BOLD),
         );
+        let block = Block::default()
+            .title(danger_title)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Double)
+            .border_style(theme.danger);
 
-        let modal = Paragraph::new(text)
-            .block(
-                Block::default()
-                    .title("  Confirm Destroy  ")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Red)),
-            )
-            .wrap(Wrap { trim: true });
+        let inner = block.inner(modal_area);
+        frame.render_widget(block, modal_area);
 
-        frame.render_widget(modal, modal_area);
+        let content = vec![
+            Line::from(format!("Destroy \"{}\"?", confirm.name)),
+            Line::from(""),
+            Line::from("Its $HOME is preserved unless you also remove it."),
+            Line::from(Span::styled(
+                format!("{rm_home_indicator} h: also remove $HOME"),
+                theme.warning,
+            )),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("[y]", theme.danger),
+                Span::raw("es / "),
+                Span::styled("[n]", theme.success),
+                Span::raw("o"),
+            ]),
+        ];
+        let modal = Paragraph::new(content).wrap(Wrap { trim: true });
+        frame.render_widget(modal, inner);
     }
 
     // ─── Progress screen ──────────────────────────────────────────────────────
 
-    fn render_progress(model: &Model, frame: &mut Frame, area: ratatui::layout::Rect) {
+    fn render_progress(
+        model: &Model,
+        frame: &mut Frame,
+        area: ratatui::layout::Rect,
+        theme: &Theme,
+    ) {
         let progress = match &model.progress {
             Some(p) => p,
             None => return,
         };
 
         let block = Block::default()
-            .title(format!("  {}  ", progress.title))
+            .title(Span::styled(format!("  {}  ", progress.title), theme.title))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Magenta));
+            .border_type(BorderType::Thick)
+            .border_style(theme.accent);
 
         // Show recreate confirm if needed.
         if progress.recreate_confirm {
@@ -386,8 +494,18 @@ mod inner {
                 .recreate_msg
                 .clone()
                 .unwrap_or_else(|| "Recreate needed.".to_string());
-            let p = Paragraph::new(format!("{}\n\nRecreate now? [y]es / [n]o", msg))
-                .wrap(Wrap { trim: true });
+            let content = vec![
+                Line::from(msg),
+                Line::from(""),
+                Line::from(vec![
+                    Span::raw("Recreate now? "),
+                    Span::styled("[y]", theme.danger),
+                    Span::raw("es / "),
+                    Span::styled("[n]", theme.success),
+                    Span::raw("o"),
+                ]),
+            ];
+            let p = Paragraph::new(content).wrap(Wrap { trim: true });
             frame.render_widget(p, inner);
             return;
         }
@@ -396,7 +514,11 @@ mod inner {
             let spinner = SPINNER_FRAMES[model.spinner_tick % SPINNER_FRAMES.len()];
             let inner = block.inner(area);
             frame.render_widget(block, area);
-            let p = Paragraph::new(format!("{spinner} Running…")).alignment(Alignment::Center);
+            let p = Paragraph::new(Span::styled(
+                format!("{spinner} {}", strings::PROGRESS_RUNNING),
+                theme.accent,
+            ))
+            .alignment(Alignment::Center);
             frame.render_widget(p, inner);
             return;
         }
@@ -405,17 +527,17 @@ mod inner {
         frame.render_widget(block, area);
 
         if progress.steps.is_empty() {
-            let p =
-                Paragraph::new("Done. Press Enter or Esc to return.").alignment(Alignment::Center);
+            let p = Paragraph::new(Span::styled(strings::PROGRESS_DONE, theme.muted))
+                .alignment(Alignment::Center);
             frame.render_widget(p, inner);
             return;
         }
 
         let header = Row::new(vec![
-            Cell::from("#").style(Style::default().add_modifier(Modifier::BOLD)),
-            Cell::from("TYPE").style(Style::default().add_modifier(Modifier::BOLD)),
-            Cell::from("STATUS").style(Style::default().add_modifier(Modifier::BOLD)),
-            Cell::from("MS").style(Style::default().add_modifier(Modifier::BOLD)),
+            Cell::from("#").style(theme.header_cell),
+            Cell::from("TYPE").style(theme.header_cell),
+            Cell::from("STATUS").style(theme.header_cell),
+            Cell::from("MS").style(theme.header_cell),
         ]);
 
         let rows: Vec<Row> = progress
@@ -423,9 +545,9 @@ mod inner {
             .iter()
             .map(|s| {
                 let status_style = match s.status.as_str() {
-                    "ran" | "copied" => Style::default().fg(Color::Green),
-                    "skipped" => Style::default().fg(Color::DarkGray),
-                    "failed" => Style::default().fg(Color::Red),
+                    "ran" | "copied" => theme.success,
+                    "skipped" => theme.muted,
+                    "failed" => theme.danger,
                     _ => Style::default(),
                 };
                 Row::new(vec![
@@ -450,18 +572,22 @@ mod inner {
 
     // ─── Doctor panel ─────────────────────────────────────────────────────────
 
-    fn render_doctor(model: &Model, frame: &mut Frame, area: ratatui::layout::Rect) {
+    fn render_doctor(model: &Model, frame: &mut Frame, area: ratatui::layout::Rect, theme: &Theme) {
         let block = Block::default()
-            .title("  Doctor  ")
+            .title(Span::styled(" doctor ", theme.title))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Yellow));
+            .border_type(BorderType::Thick)
+            .border_style(theme.warning);
 
         if model.busy {
             let spinner = SPINNER_FRAMES[model.spinner_tick % SPINNER_FRAMES.len()];
             let inner = block.inner(area);
             frame.render_widget(block, area);
-            let p =
-                Paragraph::new(format!("{spinner} Running doctor…")).alignment(Alignment::Center);
+            let p = Paragraph::new(Span::styled(
+                format!("{spinner} {}", strings::LOADING_DOCTOR),
+                theme.warning,
+            ))
+            .alignment(Alignment::Center);
             frame.render_widget(p, inner);
             return;
         }
@@ -478,53 +604,53 @@ mod inner {
             Some(d) => d,
         };
 
-        let ok_str = |b: bool| if b { "✓" } else { "✗" };
-
         let mut lines = vec![
-            Line::from(format!(
-                "distrobox present: {}",
-                ok_str(content.distrobox.present)
-            )),
+            Line::from(vec![
+                Span::raw("distrobox present: "),
+                ok_glyph(content.distrobox.present, theme),
+            ]),
             Line::from(format!(
                 "distrobox version: {}",
                 content.distrobox.version.as_deref().unwrap_or("unknown")
             )),
-            Line::from(format!(
-                "distrobox supported: {}",
-                ok_str(content.distrobox.supported)
-            )),
+            Line::from(vec![
+                Span::raw("distrobox supported: "),
+                ok_glyph(content.distrobox.supported, theme),
+            ]),
             Line::from(""),
             Line::from(format!(
                 "backend selected: {}",
                 content.backend.selected.as_deref().unwrap_or("(none)")
             )),
-            Line::from(format!(
-                "podman present: {}  reachable: {}",
-                ok_str(content.backend.podman.present),
-                ok_str(content.backend.podman.reachable)
-            )),
-            Line::from(format!(
-                "docker present: {}  reachable: {}",
-                ok_str(content.backend.docker.present),
-                ok_str(content.backend.docker.reachable)
-            )),
+            Line::from(vec![
+                Span::raw("podman present: "),
+                ok_glyph(content.backend.podman.present, theme),
+                Span::raw("  reachable: "),
+                ok_glyph(content.backend.podman.reachable, theme),
+            ]),
+            Line::from(vec![
+                Span::raw("docker present: "),
+                ok_glyph(content.backend.docker.present, theme),
+                Span::raw("  reachable: "),
+                ok_glyph(content.backend.docker.reachable, theme),
+            ]),
         ];
 
         if !content.warnings.is_empty() {
             lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "Warnings:",
-                Style::default().fg(Color::Yellow),
-            )));
+            lines.push(Line::from(Span::styled("Warnings:", theme.warning)));
             for w in &content.warnings {
-                lines.push(Line::from(format!("  ! {w}")));
+                lines.push(Line::from(vec![
+                    Span::styled("! ", theme.warning),
+                    Span::raw(w.clone()),
+                ]));
             }
         }
 
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "Press Esc or q to return.",
-            Style::default().fg(Color::DarkGray),
+            theme.muted,
         )));
 
         let p = Paragraph::new(lines).wrap(Wrap { trim: false });
@@ -533,27 +659,25 @@ mod inner {
 
     // ─── Status bar ───────────────────────────────────────────────────────────
 
-    fn render_status_bar(model: &Model, frame: &mut Frame, area: ratatui::layout::Rect) {
-        let help =
-            "↑↓ move · enter open · c create · s stop · d destroy · a apply · e edit · ? doctor · q quit";
+    fn render_status_bar(
+        model: &Model,
+        frame: &mut Frame,
+        area: ratatui::layout::Rect,
+        theme: &Theme,
+    ) {
+        let help = strings::HELP;
 
         let (status_text, style) = match &model.status {
-            StatusLine::Idle => (help.to_string(), Style::default().fg(Color::DarkGray)),
+            StatusLine::Idle => (help.to_string(), theme.muted),
             StatusLine::Busy(msg) => {
                 let spinner = SPINNER_FRAMES[model.spinner_tick % SPINNER_FRAMES.len()];
-                (
-                    format!("{spinner} {msg}"),
-                    Style::default().fg(Color::Yellow),
-                )
+                (format!("{spinner} {msg}"), theme.accent)
             }
-            StatusLine::Ok(msg) => (
-                format!("  {msg}  |  {help}"),
-                Style::default().fg(Color::Green),
-            ),
-            StatusLine::Error(msg) => (format!("error: {msg}"), Style::default().fg(Color::Red)),
+            StatusLine::Ok(msg) => (format!("  {msg}  ·  {help}"), theme.success),
+            StatusLine::Error(msg) => (format!("{}{}", strings::ERROR_PREFIX, msg), theme.danger),
         };
 
-        let p = Paragraph::new(status_text).style(style);
+        let p = Paragraph::new(Span::styled(status_text, style));
         frame.render_widget(p, area);
     }
 }

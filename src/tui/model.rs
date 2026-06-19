@@ -4,6 +4,7 @@
 
 use crate::core::spec::{BoxRow, DoctorResult, EnterSpec, InspectResult, ProvisionStepResult};
 use crate::dbox::backend::Backend;
+use crate::tui::theme::ColorMode;
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
@@ -149,6 +150,10 @@ pub struct Model {
     pub pending_enter: Option<EnterSpec>,
     pub pending_edit: Option<String>,
     pub spinner_tick: usize,
+    /// Color capability detected at launch; used by `view` to build the `Theme`.
+    /// Defaults to `TrueColor` inside `Model::new` (test-friendly); overridden
+    /// by `app::run` after the real detection runs.
+    pub color_mode: ColorMode,
 }
 
 impl Model {
@@ -171,6 +176,9 @@ impl Model {
             pending_enter: None,
             pending_edit: None,
             spinner_tick: 0,
+            // Default to TrueColor so tests compile unchanged (Model::new(Backend::Podman)).
+            // app::run overrides this with the result of theme::detect() at launch.
+            color_mode: ColorMode::TrueColor,
         }
     }
 
