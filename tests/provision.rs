@@ -163,6 +163,8 @@ fn ac_prov_3_copy_spawn() {
         force: false,
         redo: &[],
         dry_run: false,
+        provision_env_keys: &[],
+        provision_env: &[],
     };
 
     let mut state = ProvisionState::new();
@@ -203,6 +205,8 @@ fn ac_prov_4_copy_missing_src() {
         force: false,
         redo: &[],
         dry_run: false,
+        provision_env_keys: &[],
+        provision_env: &[],
     };
 
     let mut state = ProvisionState::new();
@@ -247,6 +251,8 @@ fn ac_prov_5_partial_failure_resume() {
         force: false,
         redo: &[],
         dry_run: false,
+        provision_env_keys: &[],
+        provision_env: &[],
     };
 
     let mut state = ProvisionState::new();
@@ -292,6 +298,8 @@ fn ac_prov_5_partial_failure_resume() {
         force: false,
         redo: &[],
         dry_run: false,
+        provision_env_keys: &[],
+        provision_env: &[],
     };
 
     let results2 = provision(&plan2, &store2, &runner2, &mut state2).unwrap();
@@ -430,6 +438,8 @@ fn ac_prov_9_failure_error_surfaces_stderr_and_index() {
         force: false,
         redo: &[],
         dry_run: false,
+        provision_env_keys: &[],
+        provision_env: &[],
     };
 
     let mut state = ProvisionState::new();
@@ -492,6 +502,8 @@ fn ac_prov_10_failed_step_reruns_not_skipped() {
         force: false,
         redo: &[],
         dry_run: false,
+        provision_env_keys: &[],
+        provision_env: &[],
     };
 
     let mut state = store.read("electionbuddy", &runner).unwrap();
@@ -549,6 +561,8 @@ fn ac_prov_11_ok_step_with_matching_hash_is_skipped() {
         force: false,
         redo: &[],
         dry_run: false,
+        provision_env_keys: &[],
+        provision_env: &[],
     };
 
     let mut state = store.read("web-dev", &runner).unwrap();
@@ -582,6 +596,8 @@ fn g_idempotent_second_apply_makes_zero_run_spawns() {
         force: false,
         redo: &[],
         dry_run: false,
+        provision_env_keys: &[],
+        provision_env: &[],
     };
 
     let mut state1 = ProvisionState::new();
@@ -603,6 +619,8 @@ fn g_idempotent_second_apply_makes_zero_run_spawns() {
         force: false,
         redo: &[],
         dry_run: false,
+        provision_env_keys: &[],
+        provision_env: &[],
     };
 
     let results2 = provision(&plan2, &store2, &runner2, &mut state2).unwrap();

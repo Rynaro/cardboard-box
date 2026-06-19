@@ -10,6 +10,7 @@ pub mod inspect;
 pub mod list;
 pub mod output;
 pub mod rm;
+pub mod secret;
 pub mod stop;
 pub mod tui_cmd;
 pub mod up;
@@ -140,6 +141,9 @@ pub enum Commands {
 
     /// Create-if-absent then apply (the "just works" entry point).
     Up(up::UpArgs),
+
+    /// Manage secrets stored in the OS keyring.
+    Secret(secret::SecretArgs),
 
     /// Launch the terminal cockpit.
     Tui(tui_cmd::TuiArgs),

@@ -26,6 +26,17 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 serde_json = "1"
 sha2 = "0.10"
+# Keyring: pure-Rust Secret Service via zbus (no libdbus C binding).
+# async-secret-service selects the pure-Rust `secret-service` crate (zbus-backed);
+# sync-secret-service would pull in dbus-secret-service which needs libdbus-1-dev (C).
+# The blocking:: module in secret-service gives us a sync surface without a tokio executor.
+keyring = { version = "3", default-features = false, features = [
+    "async-secret-service",
+    "tokio",
+    "crypto-rust",
+] }
+# rpassword: hidden TTY prompt for `cbox secret set` (pure-Rust, no C link).
+rpassword = "7"
 ratatui = { version = "0.28", optional = true }
 crossterm = { version = "0.28", optional = true }
 

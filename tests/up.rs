@@ -94,6 +94,9 @@ fn base_create_spec(name: &str, image: &str, boxfile_path: Option<String>) -> Cr
         backend: Backend::Podman,
         uid: 1000,
         dry_run: false,
+        env_flags: vec![],
+        env_values: vec![],
+        plain_env: vec![],
     }
 }
 
@@ -138,6 +141,8 @@ run = "echo hello"
         recreate: false,
         yes: false,
         dry_run: false,
+        provision_env_keys: vec![],
+        provision_env: vec![],
     };
 
     let outcome = core::up(&spec, &store, &runner).unwrap();
@@ -199,6 +204,8 @@ run = "echo hello"
         recreate: false,
         yes: false,
         dry_run: false,
+        provision_env_keys: vec![],
+        provision_env: vec![],
     };
 
     let outcome = core::up(&spec, &store, &runner).unwrap();
@@ -260,6 +267,8 @@ run = "apt-get install -y git"
         recreate: false,
         yes: false,
         dry_run: false,
+        provision_env_keys: vec![],
+        provision_env: vec![],
     };
 
     let outcome = core::up(&spec, &store, &runner).unwrap();
@@ -310,6 +319,8 @@ run = "echo hello"
         recreate: false,
         yes: false,
         dry_run: true,
+        provision_env_keys: vec![],
+        provision_env: vec![],
     };
 
     // Should succeed without error

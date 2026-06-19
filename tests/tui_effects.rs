@@ -337,15 +337,8 @@ packages = []
     let arc_runner: Arc<dyn cbox::dbox::runner::DistroboxRunner> = Arc::new(runner);
 
     let spec = ApplySpec {
-        name: "web-dev".to_string(),
-        boxfile_path,
-        force: false,
-        redo: vec![],
-        no_provision: false,
-        recreate: false,
         yes: true,
-        dry_run: false,
-        backend: Backend::Podman,
+        ..ApplySpec::new("web-dev", &boxfile_path, Backend::Podman)
     };
 
     let msg = execute_effect(

@@ -2,6 +2,7 @@
 //! The default impl (GuestStateStore) reads/writes the guest-side JSON file via
 //! `distrobox enter -- sh -c`. A host-side fallback is drop-in via the trait.
 
+use crate::core::secret_inject::SecretSpecSnapshot;
 use crate::dbox::{
     argv::{build_state_read_argv, build_state_write_argv},
     runner::{DistroboxRunner, Invocation, RunMode},
@@ -21,6 +22,18 @@ pub struct ProvisionState {
     #[serde(default)]
     pub packages_applied: Vec<String>,
     pub steps: Vec<AppliedStep>,
+
+    // ─── v5.0 secret / env fingerprint fields (back-compat: #[serde(default)]) ─
+    /// Value-free SHA-256 fingerprint of the [secrets]+[env] schema (NOT values).
+    #[serde(default)]
+    pub env_secret_fingerprint: String,
+    /// Snapshot of the [secrets] schema at the time state was written.
+    /// Used to classify fingerprint deltas (Recreate vs Incremental). Metadata only.
+    #[serde(default)]
+    pub secret_specs: Vec<SecretSpecSnapshot>,
+    /// Keys present in [env] at the time state was written. Metadata only.
+    #[serde(default)]
+    pub env_keys: Vec<String>,
 }
 
 impl ProvisionState {
@@ -30,6 +43,9 @@ impl ProvisionState {
             boxfile_sha: String::new(),
             packages_applied: Vec::new(),
             steps: Vec::new(),
+            env_secret_fingerprint: String::new(),
+            secret_specs: Vec::new(),
+            env_keys: Vec::new(),
         }
     }
 

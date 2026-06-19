@@ -10,7 +10,33 @@ use crate::core::spec::{
 };
 use crate::core::state_store::{GuestStateStore, ProvisionStateStore};
 use crate::dbox::runner::DistroboxRunner;
+use crate::secret::{SecretError, SecretStore};
 use crate::tui::message::{CreateOutcome, Message, RmOutcome, StopOutcome};
+
+/// No-op secret store for TUI context (keyring not wired into TUI).
+struct TuiNoOpStore;
+impl SecretStore for TuiNoOpStore {
+    fn set(&self, _: &str, _: &str, _: &str) -> Result<(), SecretError> {
+        Err(SecretError::Unavailable(
+            "keyring not available in TUI".into(),
+        ))
+    }
+    fn get(&self, _: &str, _: &str) -> Result<Option<String>, SecretError> {
+        Err(SecretError::Unavailable(
+            "keyring not available in TUI".into(),
+        ))
+    }
+    fn delete(&self, _: &str, _: &str) -> Result<(), SecretError> {
+        Err(SecretError::Unavailable(
+            "keyring not available in TUI".into(),
+        ))
+    }
+    fn list(&self, _: &str) -> Result<Vec<String>, SecretError> {
+        Err(SecretError::Unavailable(
+            "keyring not available in TUI".into(),
+        ))
+    }
+}
 
 /// Declarative side-work descriptions.
 #[derive(Debug)]
@@ -95,7 +121,7 @@ pub fn execute_effect(
         }
 
         Effect::Doctor(spec) => {
-            let result = core::doctor(&spec, runner.as_ref());
+            let result = core::doctor(&spec, runner.as_ref(), &TuiNoOpStore);
             Some(Message::DoctorDone(result))
         }
 

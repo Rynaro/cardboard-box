@@ -60,6 +60,17 @@ pub struct CreateSpec {
     pub uid: u32,
     /// Dry-run mode.
     pub dry_run: bool,
+
+    // ─── secret / env injection (added for v5.0 native secrets) ─────────────
+    /// KEY names for persist=true secrets → `--env KEY` (name-only) in argv.
+    /// Values are NEVER placed in argv — they ride `env_values` on Invocation.env.
+    pub env_flags: Vec<String>,
+    /// (KEY, VALUE) pairs for persist=true secrets → attached to Invocation.env.
+    /// The VALUE is never in argv.
+    pub env_values: Vec<(String, String)>,
+    /// (KEY, VALUE) pairs from `[env]` table → `--env KEY=VALUE` inline in argv
+    /// (non-secret, so value-in-argv is acceptable).
+    pub plain_env: Vec<(String, String)>,
 }
 
 impl CreateSpec {
@@ -80,6 +91,9 @@ impl CreateSpec {
             backend,
             uid: get_uid(),
             dry_run: false,
+            env_flags: Vec::new(),
+            env_values: Vec::new(),
+            plain_env: Vec::new(),
         }
     }
 }
@@ -193,6 +207,15 @@ pub struct DoctorResult {
     pub distrobox: DistroboxInfo,
     pub backend: BackendInfo,
     pub warnings: Vec<String>,
+    /// Keyring availability (non-fatal informational line).
+    pub keyring: KeyringStatus,
+}
+
+/// Secret Service / keyring availability probe result.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct KeyringStatus {
+    pub available: bool,
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -231,6 +254,46 @@ pub struct ApplySpec {
     pub yes: bool,
     pub dry_run: bool,
     pub backend: Backend,
+
+    // ─── persist=false secret injection (v5.0) ──────────────────────────────
+    /// KEY names for persist=false secrets → `--env KEY` (name-only) in argv
+    /// for provision shell steps.  Empty when no ProvisionOnly secrets exist.
+    pub provision_env_keys: Vec<String>,
+    /// (KEY, VALUE) pairs for persist=false secrets → Invocation.env for shell
+    /// steps.  Never in argv (INV-1).
+    pub provision_env: Vec<(String, String)>,
+
+    // ─── persist=true secret injection for recreate path (v5.0) ─────────────
+    /// KEY names for persist=true secrets → `--env KEY` in the recreate
+    /// create call.  Only populated on the `--recreate` path.
+    pub recreate_env_flags: Vec<String>,
+    /// (KEY, VALUE) pairs for persist=true secrets on the recreate path.
+    pub recreate_env_values: Vec<(String, String)>,
+    /// (KEY, VALUE) pairs from `[env]` table for the recreate create call.
+    pub recreate_plain_env: Vec<(String, String)>,
+}
+
+impl ApplySpec {
+    /// Convenience constructor with all secret fields zeroed (the common case
+    /// when `apply` is called without a secret store).
+    pub fn new(name: impl Into<String>, boxfile_path: impl Into<String>, backend: Backend) -> Self {
+        Self {
+            name: name.into(),
+            boxfile_path: boxfile_path.into(),
+            force: false,
+            redo: Vec::new(),
+            no_provision: false,
+            recreate: false,
+            yes: false,
+            dry_run: false,
+            backend,
+            provision_env_keys: Vec::new(),
+            provision_env: Vec::new(),
+            recreate_env_flags: Vec::new(),
+            recreate_env_values: Vec::new(),
+            recreate_plain_env: Vec::new(),
+        }
+    }
 }
 
 /// Spec for `cbox up`.
@@ -243,6 +306,13 @@ pub struct UpSpec {
     pub recreate: bool,
     pub yes: bool,
     pub dry_run: bool,
+
+    // ─── persist=false secret injection (v5.0) ──────────────────────────────
+    /// KEY names for persist=false secrets → provision shell step `--env KEY`.
+    pub provision_env_keys: Vec<String>,
+    /// (KEY, VALUE) pairs for persist=false secrets → Invocation.env for
+    /// provision shell steps.  Never in argv (INV-1).
+    pub provision_env: Vec<(String, String)>,
 }
 
 /// Outcome of `cbox apply`.

@@ -6,4 +6,5 @@ pub mod cli;
 pub mod core;
 pub mod dbox;
 pub mod error;
+pub mod secret;
 pub mod tui;

@@ -98,17 +98,7 @@ run = "cargo install just"
 }
 
 fn make_apply_spec(name: &str, boxfile_path: &str) -> ApplySpec {
-    ApplySpec {
-        name: name.to_string(),
-        boxfile_path: boxfile_path.to_string(),
-        force: false,
-        redo: vec![],
-        no_provision: false,
-        recreate: false,
-        yes: false,
-        dry_run: false,
-        backend: Backend::Podman,
-    }
+    ApplySpec::new(name, boxfile_path, Backend::Podman)
 }
 
 fn write_boxfile(dir: &TempDir, content: &str) -> String {

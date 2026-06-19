@@ -6,6 +6,7 @@ mod cli;
 mod core;
 mod dbox;
 mod error;
+mod secret;
 mod tui;
 
 use std::sync::Arc;
@@ -14,6 +15,7 @@ use clap::Parser;
 use cli::{output::OutputCtx, Cli, Commands};
 use dbox::real::RealRunner;
 use error::CboxError;
+use secret::keyring_store::KeyringStore;
 use tui::TuiConfig;
 
 fn main() {
@@ -24,7 +26,10 @@ fn main() {
     // Wrap runner in Arc so it can be shared into the TUI worker thread.
     let runner: Arc<dyn dbox::runner::DistroboxRunner> = Arc::new(RealRunner);
 
-    let result = dispatch(&cli, &ctx, runner);
+    // Real keyring backend — wired into commands that need it.
+    let keyring = KeyringStore;
+
+    let result = dispatch(&cli, &ctx, runner, &keyring);
 
     match result {
         Ok(()) => {}
@@ -49,6 +54,7 @@ fn dispatch(
     cli: &Cli,
     ctx: &OutputCtx,
     runner: Arc<dyn dbox::runner::DistroboxRunner>,
+    keyring: &dyn secret::SecretStore,
 ) -> Result<(), CboxError> {
     let backend_str = cli.backend.as_deref();
 
@@ -65,9 +71,14 @@ fn dispatch(
             // `cbox tui` explicit → same TTY guard, but the error message differs.
             launch_tui(cli, ctx, runner, backend_str, true)
         }
-        Some(Commands::Create(args)) => {
-            cli::create::run(args, cli.dry_run, backend_str, ctx, runner_ref)
-        }
+        Some(Commands::Create(args)) => cli::create::run_with_store(
+            args,
+            cli.dry_run,
+            backend_str,
+            ctx,
+            runner_ref,
+            Some(keyring),
+        ),
         Some(Commands::List(args)) => cli::list::run(args, backend_str, ctx, runner_ref),
         Some(Commands::Rm(args)) => cli::rm::run(args, cli.yes, backend_str, ctx, runner_ref),
         Some(Commands::Stop(args)) => cli::stop::run(args, backend_str, ctx, runner_ref),
@@ -76,13 +87,28 @@ fn dispatch(
         }
         Some(Commands::Inspect(args)) => cli::inspect::run(args, backend_str, ctx, runner_ref),
         Some(Commands::Edit(args)) => cli::edit::run(args, cli.json, backend_str, ctx, runner_ref),
-        Some(Commands::Doctor(args)) => cli::doctor::run(args, backend_str, ctx, runner_ref),
-        Some(Commands::Apply(args)) => {
-            cli::apply::run(args, cli.dry_run, backend_str, cli.yes, ctx, runner_ref)
+        Some(Commands::Doctor(args)) => {
+            cli::doctor::run_with_store(args, backend_str, ctx, runner_ref, keyring)
         }
-        Some(Commands::Up(args)) => {
-            cli::up::run(args, cli.dry_run, backend_str, cli.yes, ctx, runner_ref)
-        }
+        Some(Commands::Apply(args)) => cli::apply::run_with_store(
+            args,
+            cli.dry_run,
+            backend_str,
+            cli.yes,
+            ctx,
+            runner_ref,
+            Some(keyring),
+        ),
+        Some(Commands::Up(args)) => cli::up::run_with_store(
+            args,
+            cli.dry_run,
+            backend_str,
+            cli.yes,
+            ctx,
+            runner_ref,
+            Some(keyring),
+        ),
+        Some(Commands::Secret(args)) => cli::secret::run(args, ctx, keyring),
     }
 }
 

@@ -88,6 +88,19 @@ pub fn build_create_argv(spec: &CreateSpec) -> Vec<String> {
         }
     }
 
+    // ─── secret env flags (persist=true) — name-only, value rides Invocation.env ──
+    // These must appear BEFORE the cbox label block (which is always the final token).
+    for key in &spec.env_flags {
+        args.push("--additional-flags".into());
+        args.push(format!("--env {key}"));
+    }
+
+    // ─── plaintext [env] flags — value inline in argv (non-secret) ──────────────
+    for (key, value) in &spec.plain_env {
+        args.push("--additional-flags".into());
+        args.push(format!("--env {key}={value}"));
+    }
+
     // cbox labels (§5.5 + §4.4 cbox.image added in P2)
     let docker_label = match &spec.docker_mode {
         DockerMode::None => "none",
@@ -193,6 +206,27 @@ pub fn build_provision_shell_argv(name: &str, run: &str) -> Vec<String> {
         "-c".to_string(),
         run.to_string(),
     ]
+}
+
+/// Build the argv for a provision shell step with env injection (name-only --env KEY flags).
+/// `env_keys` are the KEY names for persist=false secrets; values ride Invocation.env.
+///
+/// distrobox enter --name <N> --additional-flags "--env K1" … -- sh -c "<run>"
+pub fn build_provision_shell_argv_with_env(
+    name: &str,
+    run: &str,
+    env_keys: &[String],
+) -> Vec<String> {
+    let mut args = vec!["enter".to_string(), "--name".to_string(), name.to_string()];
+    for key in env_keys {
+        args.push("--additional-flags".into());
+        args.push(format!("--env {key}"));
+    }
+    args.push("--".to_string());
+    args.push("sh".to_string());
+    args.push("-c".to_string());
+    args.push(run.to_string());
+    args
 }
 
 /// Build the argv for `<backend> cp <host_src> <name>:<guest_dst>`.

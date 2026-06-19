@@ -4,6 +4,7 @@ use super::discover_boxfile_in;
 use super::output::OutputCtx;
 use crate::boxfile::model::DockerModeField;
 use crate::boxfile::{self, validate::is_valid_name};
+use crate::core::secret_inject::{resolve_secret_env, SecretScope};
 use crate::core::state_store::GuestStateStore;
 use crate::core::{
     self,
@@ -12,6 +13,7 @@ use crate::core::{
 use crate::dbox::backend::Backend;
 use crate::dbox::runner::DistroboxRunner;
 use crate::error::CboxError;
+use crate::secret::SecretStore;
 use clap::Args;
 
 #[derive(Args, Debug)]
@@ -78,6 +80,11 @@ pub struct UpArgs {
     pub recreate: bool,
 }
 
+/// Thin wrapper that calls `run_with_store` without a secret store.
+/// Used when `main.rs` needs to dispatch without the keyring (shouldn't happen
+/// in production — main.rs always passes Some(keyring) — but kept for symmetry
+/// with the create pattern and for test ergonomics).
+#[allow(dead_code)]
 pub fn run(
     args: &UpArgs,
     global_dry_run: bool,
@@ -86,15 +93,55 @@ pub fn run(
     ctx: &OutputCtx,
     runner: &dyn DistroboxRunner,
 ) -> Result<(), CboxError> {
+    run_with_store(
+        args,
+        global_dry_run,
+        global_backend,
+        global_yes,
+        ctx,
+        runner,
+        None,
+    )
+}
+
+/// Full implementation: resolves secrets ALL-OR-NOTHING (D3) before any spawn,
+/// then delegates to `core::up`.
+///
+/// When `store` is `Some`, secrets in the Boxfile are resolved eagerly:
+/// - `persist=true` → `create_spec.env_flags` / `env_values` (baked into Config.Env)
+/// - `persist=false` → `up_spec.provision_env_keys` / `provision_env` (provision only)
+/// - `[env]` table → `create_spec.plain_env` (non-secret, value-in-argv ok)
+///
+/// A missing or unavailable secret returns exit 75 BEFORE `core::up` runs —
+/// nothing is created or spawned (D3 safety guarantee).
+#[allow(clippy::too_many_arguments)]
+pub fn run_with_store(
+    args: &UpArgs,
+    global_dry_run: bool,
+    global_backend: Option<&str>,
+    global_yes: bool,
+    ctx: &OutputCtx,
+    runner: &dyn DistroboxRunner,
+    store: Option<&dyn SecretStore>,
+) -> Result<(), CboxError> {
     // Name resolution happens before backend resolution because we need the name
     // to look up which backend already hosts the box (mirrors the `enter` pattern).
     // We build the CreateSpec first using Backend::detect as a placeholder, then
     // replace the backend with the resolve_backend result once we have the name.
     let detected_backend = Backend::detect(global_backend)?;
 
-    let mut create_spec = if let Some(ref file_path) = args.file {
+    // Resolve the Boxfile (if any) so we can run secret resolution before any spawn.
+    // For the name-only path there is no Boxfile, so secrets cannot be declared there.
+    let (mut create_spec, resolved_bf) = if let Some(ref file_path) = args.file {
         // Priority 1: --file explicitly given.
-        spec_from_boxfile(file_path, &detected_backend)?
+        let (bf, warnings) = boxfile::parse_file(file_path)?;
+        for w in &warnings {
+            eprintln!("warn: {w}");
+        }
+        (
+            spec_from_boxfile_model(&bf, file_path, &detected_backend)?,
+            Some(bf),
+        )
     } else if let Some(ref name) = args.name {
         // Priority 2: positional NAME given — existing label/XDG behaviour.
         if !is_valid_name(name) {
@@ -105,23 +152,29 @@ pub fn run(
         let docker_mode = parse_docker_mode(&args.docker)?;
         let mounts = parse_mounts(&args.mounts)?;
 
-        CreateSpec {
-            name: name.clone(),
-            image: args.image.clone(),
-            packages: args.packages.clone(),
-            docker_mode,
-            mounts,
-            home: args.home.clone(),
-            hostname: args.hostname.clone(),
-            init: args.init,
-            pull: args.pull,
-            root: false,
-            boxfile_path: None,
-            unshare: None,
-            backend: detected_backend.clone(),
-            uid: get_uid(),
-            dry_run: global_dry_run,
-        }
+        (
+            CreateSpec {
+                name: name.clone(),
+                image: args.image.clone(),
+                packages: args.packages.clone(),
+                docker_mode,
+                mounts,
+                home: args.home.clone(),
+                hostname: args.hostname.clone(),
+                init: args.init,
+                pull: args.pull,
+                root: false,
+                boxfile_path: None,
+                unshare: None,
+                backend: detected_backend.clone(),
+                uid: get_uid(),
+                dry_run: global_dry_run,
+                env_flags: Vec::new(),
+                env_values: Vec::new(),
+                plain_env: Vec::new(),
+            },
+            None,
+        )
     } else if let Some(cwd_path) = std::env::current_dir()
         .ok()
         .as_deref()
@@ -131,12 +184,55 @@ pub fn run(
         if !ctx.quiet {
             ctx.hint(&format!("Using ./{cwd_path}"));
         }
-        spec_from_boxfile(cwd_path, &detected_backend)?
+        let (bf, warnings) = boxfile::parse_file(cwd_path)?;
+        for w in &warnings {
+            eprintln!("warn: {w}");
+        }
+        (
+            spec_from_boxfile_model(&bf, cwd_path, &detected_backend)?,
+            Some(bf),
+        )
     } else {
         return Err(CboxError::usage(
             "NAME is required unless --file is provided or a Boxfile.toml exists in the current directory.",
         ));
     };
+
+    // ── Secret resolution — ALL-OR-NOTHING before any spawn (D3) ────────────
+    // persist=true: bake into Config.Env at create time.
+    // persist=false: inject at provision time only.
+    // [env]: plaintext, value-in-argv ok.
+    let mut provision_env_keys: Vec<String> = Vec::new();
+    let mut provision_env: Vec<(String, String)> = Vec::new();
+
+    if let (Some(secret_store), Some(ref bf)) = (store, &resolved_bf) {
+        if !bf.secrets.is_empty() {
+            // persist=true → create-time injection (Config.Env)
+            let persisted = resolve_secret_env(
+                &create_spec.name,
+                &bf.secrets,
+                SecretScope::Persisted,
+                secret_store,
+            )?;
+            for (k, v) in &persisted {
+                create_spec.env_flags.push(k.clone());
+                create_spec.env_values.push((k.clone(), v.clone()));
+            }
+            // persist=false → provision-time injection only
+            let provision_only = resolve_secret_env(
+                &create_spec.name,
+                &bf.secrets,
+                SecretScope::ProvisionOnly,
+                secret_store,
+            )?;
+            provision_env_keys = provision_only.iter().map(|(k, _)| k.clone()).collect();
+            provision_env = provision_only;
+        }
+        // Populate plain_env from [env] (non-secret, value-in-argv ok)
+        for (k, v) in &bf.env {
+            create_spec.plain_env.push((k.clone(), v.clone()));
+        }
+    }
 
     // Route to whichever engine actually hosts this box — mirrors the pattern
     // used by `enter`. When the box doesn't exist yet, resolve_backend falls back
@@ -152,14 +248,16 @@ pub fn run(
         recreate: args.recreate,
         yes: global_yes,
         dry_run: global_dry_run,
+        provision_env_keys,
+        provision_env,
     };
 
-    let store = GuestStateStore;
+    let state_store = GuestStateStore;
     // Capture name + boxfile_path before moving into the outcome for hint purposes.
     let box_name = up_spec.create_spec.name.clone();
     let boxfile_path_for_hint = up_spec.create_spec.boxfile_path.clone().unwrap_or_default();
 
-    let outcome = core::up(&up_spec, &store, runner).inspect_err(|e| {
+    let outcome = core::up(&up_spec, &state_store, runner).inspect_err(|e| {
         emit_provision_failure_hint(e, &box_name, &boxfile_path_for_hint, ctx);
     })?;
 
@@ -233,12 +331,14 @@ fn render_apply_outcome(outcome: &crate::core::spec::ApplyOutcome, ctx: &OutputC
     }
 }
 
-fn spec_from_boxfile(path: &str, backend: &Backend) -> Result<CreateSpec, CboxError> {
-    let (bf, warnings) = boxfile::parse_file(path)?;
-    for w in &warnings {
-        eprintln!("warn: {w}");
-    }
-
+/// Build a `CreateSpec` from an already-parsed `Boxfile` model.
+/// Secret/env fields are left empty — the caller populates them after
+/// resolution (so resolution can fail before any spec is passed to core).
+fn spec_from_boxfile_model(
+    bf: &crate::boxfile::model::Boxfile,
+    path: &str,
+    backend: &Backend,
+) -> Result<CreateSpec, CboxError> {
     if !is_valid_name(&bf.name) {
         return Err(CboxError::dataerr(format!(
             "Boxfile name \"{}\" is invalid.",
@@ -263,20 +363,20 @@ fn spec_from_boxfile(path: &str, backend: &Backend) -> Result<CreateSpec, CboxEr
         .collect();
 
     Ok(CreateSpec {
-        name: bf.name,
-        image: bf.image,
-        packages: bf.packages,
+        name: bf.name.clone(),
+        image: bf.image.clone(),
+        packages: bf.packages.clone(),
         docker_mode,
         mounts,
         home: if bf.box_config.home.is_empty() {
             None
         } else {
-            Some(bf.box_config.home)
+            Some(bf.box_config.home.clone())
         },
         hostname: if bf.box_config.hostname.is_empty() {
             None
         } else {
-            Some(bf.box_config.hostname)
+            Some(bf.box_config.hostname.clone())
         },
         init: bf.sandbox.init,
         pull: bf.box_config.pull,
@@ -286,6 +386,9 @@ fn spec_from_boxfile(path: &str, backend: &Backend) -> Result<CreateSpec, CboxEr
         backend: backend.clone(),
         uid: get_uid(),
         dry_run: false,
+        env_flags: Vec::new(),
+        env_values: Vec::new(),
+        plain_env: Vec::new(),
     })
 }
 
