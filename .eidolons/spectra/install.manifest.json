@@ -2,7 +2,7 @@
   "eidolon": "spectra",
   "version": "4.9.1",
   "methodology": "SPECTRA",
-  "installed_at": "2026-06-16T23:10:30Z",
+  "installed_at": "2026-06-18T18:03:56Z",
   "target": "./.eidolons/spectra",
   "ecl_version_emitted": "2.0",
   "spec_file": ".eidolons/spectra/SPEC.md",
@@ -145,13 +145,13 @@
     },
     {
       "path": "AGENTS.md",
-      "sha256": "384596a69b685cea4b1eefbf016ffa65482a251208e53f97d67f1b1383ee78db",
+      "sha256": "b2c87c39cfbc2e88a523367d20371925b11dc2edf2141910f2be20b3dd0c5980",
       "role": "dispatch",
       "mode": "appended"
     },
     {
       "path": "CLAUDE.md",
-      "sha256": "384596a69b685cea4b1eefbf016ffa65482a251208e53f97d67f1b1383ee78db",
+      "sha256": "80c14b823c6a4cf938b0e2029f71c1ec9011fcfe515dfc68bb42f9530e166715",
       "role": "dispatch",
       "mode": "appended"
     },
@@ -163,7 +163,7 @@
     },
     {
       "path": "./.eidolons/spectra/install.manifest.json",
-      "sha256": "",
+      "sha256": "037e3c4ca5a0c95b93ffedb130a979ef66e5be2e67d828b50d26a90cec808647",
       "role": "manifest",
       "mode": "created"
     }

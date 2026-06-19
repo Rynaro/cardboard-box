@@ -2,7 +2,7 @@
 name: vivi
 description: "Vivi Acceptance-Probe + Iterative Verification Reviewer — brownfield feature implementation, pattern-first, test-anchored, bounded failure recovery."
 when_to_use: "After a SPECTRA spec exists (or an equivalent human-authored brief) and you need to implement a feature in an existing codebase with an established convention set."
-tools: Read, Edit, Write, Grep, Glob, Bash, mcp__crystalium__*, mcp__atlas-aci__*
+tools: Read, Edit, Write, Grep, Glob, Bash, mcp__atlas-aci__*, mcp__crystalium__*
 model: sonnet
 methodology: Vivi
 methodology_version: "1.1"

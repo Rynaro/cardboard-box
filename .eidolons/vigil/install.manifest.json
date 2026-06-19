@@ -4,7 +4,7 @@
   "methodology": "VIGIL",
   "eiis_version": "1.4",
   "canonical_inventory_strict": true,
-  "installed_at": "2026-06-16T23:10:35Z",
+  "installed_at": "2026-06-18T18:04:00Z",
   "target": "./.eidolons/vigil",
   "spec_file": ".eidolons/vigil/SPEC.md",
   "hosts_wired": [
@@ -145,13 +145,13 @@
     },
     {
       "path": "AGENTS.md",
-      "sha256": "3eb5b8ce29faa249d97b64ceba2875a3121b87b0d8e33065f88bbcd4ecc7ba72",
+      "sha256": "36be4c15071a730789bb5e8fb81c2c6f787d1e23bf6a61612e36a649a04009da",
       "role": "dispatch",
       "mode": "appended"
     },
     {
       "path": "CLAUDE.md",
-      "sha256": "3eb5b8ce29faa249d97b64ceba2875a3121b87b0d8e33065f88bbcd4ecc7ba72",
+      "sha256": "a4225dde96397e5d640cf047a7c925e4a0be1ca111a19c15ee1db5a0db203095",
       "role": "dispatch",
       "mode": "appended"
     },

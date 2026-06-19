@@ -2,7 +2,7 @@
   "eidolon": "forge",
   "version": "1.9.1",
   "methodology": "FORGE",
-  "installed_at": "2026-06-16T23:10:34Z",
+  "installed_at": "2026-06-18T18:03:59Z",
   "target": "./.eidolons/forge",
   "spec_file": ".eidolons/forge/SPEC.md",
   "canonical_inventory_strict": true,
@@ -150,13 +150,13 @@
     },
     {
       "path": "CLAUDE.md",
-      "sha256": "7c2b0c3d6f4bfb329e9c33ffdfe0ebbc84df6415a6d45f8f42665a2b1d5bb2ac",
+      "sha256": "cfc2ff0728f226ce7d4e7023400eae792e6db4236b94ce0487404705204a62b8",
       "role": "dispatch",
       "mode": "appended"
     },
     {
       "path": "AGENTS.md",
-      "sha256": "7c2b0c3d6f4bfb329e9c33ffdfe0ebbc84df6415a6d45f8f42665a2b1d5bb2ac",
+      "sha256": "984a21a19bda1deb4f002d1f44481a4b8067c41f769374d154fbccd44b6b83da",
       "role": "dispatch",
       "mode": "appended"
     }

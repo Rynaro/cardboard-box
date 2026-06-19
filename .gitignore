@@ -13,3 +13,4 @@
 # Eidolons / agent scratch that should not be versioned
 .atlas/memex/*
 !.atlas/memex/.gitkeep
+.atlas/
