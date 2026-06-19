@@ -11,6 +11,7 @@ use crate::dbox::{
     argv::{
         build_create_argv, build_dbox_list_argv, build_enter_argv, build_inspect_argv,
         build_list_argv, build_pkg_probe_argv, build_provision_shell_argv, build_rm_argv,
+        build_stop_argv,
     },
     backend::Backend,
     runner::{DistroboxRunner, Invocation, RunMode},
@@ -19,7 +20,7 @@ use crate::error::CboxError;
 use spec::{
     ApplyOutcome, ApplySpec, ApplySummary, BackendInfo, BackendStatus, BoxRow, CreateSpec,
     DiffResult, DistroboxInfo, DoctorResult, DoctorSpec, EditSpec, EnterSpec, InspectResult,
-    InspectSpec, MountResult, ProvisionStepResult, RmSpec, UpOutcome, UpSpec,
+    InspectSpec, MountResult, ProvisionStepResult, RmSpec, StopSpec, UpOutcome, UpSpec,
 };
 use state_store::{ProvisionState, ProvisionStateStore};
 
@@ -292,6 +293,28 @@ fn label_value(item: &serde_json::Value, key: &str) -> Option<String> {
     None
 }
 
+// ─── stop ─────────────────────────────────────────────────────────────────────
+
+#[derive(Debug)]
+pub struct StopOutcome {
+    pub stopped: Vec<String>,
+}
+
+pub fn stop(spec: &StopSpec, runner: &dyn DistroboxRunner) -> Result<StopOutcome, CboxError> {
+    let args = build_stop_argv(spec);
+    let inv =
+        Invocation::new("distrobox", args, RunMode::Capture).with_env(vec![spec.backend.dbx_env()]);
+    let out = runner.run(inv)?;
+
+    if out.status != 0 {
+        return Err(CboxError::backend_error(out.status, &out.stderr, &out.argv));
+    }
+
+    Ok(StopOutcome {
+        stopped: spec.names.clone(),
+    })
+}
+
 // ─── rm ──────────────────────────────────────────────────────────────────────
 
 #[derive(Debug)]
@@ -301,6 +324,15 @@ pub struct RmOutcome {
 }
 
 pub fn rm(spec: &RmSpec, runner: &dyn DistroboxRunner) -> Result<RmOutcome, CboxError> {
+    // Best-effort stop-first: prevent distrobox rm from hanging on a running box.
+    // Ignore stop failures — the rm result is authoritative.
+    let stop_spec = StopSpec {
+        names: spec.names.clone(),
+        all: spec.all,
+        backend: spec.backend.clone(),
+    };
+    let _ = stop(&stop_spec, runner);
+
     let args = build_rm_argv(spec);
     let inv =
         Invocation::new("distrobox", args, RunMode::Capture).with_env(vec![spec.backend.dbx_env()]);

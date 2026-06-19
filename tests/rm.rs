@@ -1,8 +1,43 @@
 //! Integration tests for cbox rm / destroy — AC-RM-1 through AC-RM-4.
+//!
+//! NOTE: core::rm now issues a best-effort stop BEFORE the rm invocation.
+//! calls()[0] = stop call, calls()[1] = rm call.
 
 use cbox::core::{self, spec::RmSpec};
 use cbox::dbox::backend::Backend;
 use cbox::dbox::mock::{MockResponse, MockRunner};
+
+// AC-RM-0: core::rm makes stop-then-rm (two calls in order).
+#[test]
+fn ac_rm_0_stop_first_ordering() {
+    let runner = MockRunner::new().with_default(MockResponse::ok(""));
+    let spec = RmSpec {
+        names: vec!["web-dev".to_string()],
+        force: false,
+        rm_home: false,
+        all: false,
+        yes: true,
+        backend: Backend::Podman,
+    };
+
+    core::rm(&spec, &runner).expect("rm should succeed");
+    let calls = runner.calls();
+    assert_eq!(calls.len(), 2, "rm should issue exactly two backend calls");
+    // First call: stop
+    assert!(
+        calls[0].args.iter().any(|a| a == "stop"),
+        "first call should be stop"
+    );
+    assert!(
+        calls[0].args.iter().any(|a| a == "--yes"),
+        "stop call should have --yes"
+    );
+    // Second call: rm
+    assert!(
+        calls[1].args.iter().any(|a| a == "rm"),
+        "second call should be rm"
+    );
+}
 
 // AC-RM-1: rm with -y → runner called with distrobox rm web-dev, "Removed box" output.
 #[test]
@@ -22,15 +57,16 @@ fn ac_rm_1_basic_rm_yes() {
     assert!(outcome.skipped.is_empty());
 
     let calls = runner.calls();
-    assert_eq!(calls.len(), 1);
-    let call = &calls[0];
-    assert_eq!(call.program, "distrobox");
+    assert_eq!(calls.len(), 2, "rm should issue two calls (stop + rm)");
+    // rm call is at index 1
+    let rm_call = &calls[1];
+    assert_eq!(rm_call.program, "distrobox");
     assert!(
-        call.args.iter().any(|a| a == "rm"),
+        rm_call.args.iter().any(|a| a == "rm"),
         "args should contain 'rm'"
     );
     assert!(
-        call.args.iter().any(|a| a == "web-dev"),
+        rm_call.args.iter().any(|a| a == "web-dev"),
         "args should contain 'web-dev'"
     );
 }
@@ -55,7 +91,7 @@ fn ac_rm_2_rm_is_called_with_spec() {
     assert_eq!(outcome.removed, vec!["web-dev"]);
 }
 
-// AC-RM-3: --force → args contain --force.
+// AC-RM-3: --force → rm args contain --force (on the rm call, not the stop call).
 #[test]
 fn ac_rm_3_force_flag() {
     let runner = MockRunner::new().with_default(MockResponse::ok(""));
@@ -69,10 +105,18 @@ fn ac_rm_3_force_flag() {
     };
 
     core::rm(&spec, &runner).expect("rm should succeed");
-    let call = &runner.calls()[0];
+    let calls = runner.calls();
+    assert_eq!(calls.len(), 2, "rm should issue two calls (stop + rm)");
+    // --force is on the rm call (index 1)
+    let rm_call = &calls[1];
     assert!(
-        call.args.iter().any(|a| a == "--force"),
-        "should have --force"
+        rm_call.args.iter().any(|a| a == "--force"),
+        "rm call should have --force"
+    );
+    // stop call should NOT have --force
+    assert!(
+        !calls[0].args.iter().any(|a| a == "--force"),
+        "stop call should not have --force"
     );
 }
 
@@ -93,7 +137,9 @@ fn ac_rm_4_multiple_names() {
     let outcome = core::rm(&spec, &runner).expect("rm should succeed");
     assert_eq!(outcome.removed.len(), 2);
 
-    let call = &runner.calls()[0];
-    assert!(call.args.iter().any(|a| a == "box-a"));
-    assert!(call.args.iter().any(|a| a == "box-b"));
+    let calls = runner.calls();
+    // rm call is at index 1
+    let rm_call = &calls[1];
+    assert!(rm_call.args.iter().any(|a| a == "box-a"));
+    assert!(rm_call.args.iter().any(|a| a == "box-b"));
 }

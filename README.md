@@ -164,7 +164,7 @@ cbox
 # → launches the terminal cockpit
 ```
 
-Key bindings: `↑↓` move, `c` create, `d` destroy, `a` apply, `e` edit, `enter` inspect/enter, `?` doctor, `q` quit.
+Key bindings: `↑↓` move, `c` create, `s` stop, `d` destroy, `a` apply, `e` edit, `enter` inspect/enter, `?` doctor, `q` quit.
 
 ---
 
@@ -293,6 +293,7 @@ All commands honor global flags: `--json`, `-q`/`--quiet`, `-v` (show argv), `-v
 |---------|---------|---------|-----------|
 | `cbox create <NAME>` | — | Create a box imperatively or from a Boxfile | `-i/--image`, `-p/--package` (repeatable), `-m/--mount` (repeatable), `--docker none\|host\|nested`, `--home`, `--hostname`, `--init`, `--pull`, `--file`, `--dry-run` |
 | `cbox list` | — | List boxes (human table or `--json`) | `-a/--all` (include non-cbox boxes), `--json` |
+| `cbox stop <NAME>...` | — | Stop one or more running boxes (non-destructive) | `-a/--all` |
 | `cbox rm <NAME>...` | `destroy` | Remove boxes (confirm unless `-y`) | `-f/--force`, `--rm-home`, `-y`, `--all` |
 | `cbox enter <NAME>` | `use` | Enter a box interactively | `--root`, `--clean-path` |
 | `cbox inspect <NAME>` | `show` | Inspect a box (human panel or `--json`) | `--json`, `--raw` |
@@ -420,7 +421,7 @@ Prints the plan (which steps would SKIP or RUN, which fields differ) without exe
 <details>
 <summary><strong>TUI screens</strong></summary>
 
-- **List (home)**: table of boxes (NAME | STATUS | IMAGE | DOCKER | CBOX?). Arrow keys to move, `c` to create, `d` to destroy, `a` to apply, `e` to edit, `enter` to inspect or enter (if running), `?` for doctor, `q` to quit.
+- **List (home)**: table of boxes (NAME | STATUS | IMAGE | DOCKER | CBOX?). Arrow keys to move, `c` to create, `s` to stop, `d` to destroy, `a` to apply, `e` to edit, `enter` to inspect or enter (if running), `?` for doctor, `q` to quit.
 - **Detail (inspect)**: key/value panel for a selected box. `e` to edit its Boxfile, `a` to apply, `enter` to enter.
 - **Create wizard**: step through name, image, packages, docker-mode picker, confirm.
 - **Apply / up progress**: per-step list (idx | type | status | duration). SKIP (dim), RAN (green), COPIED (green), FAILED (red).

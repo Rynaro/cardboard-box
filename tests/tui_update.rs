@@ -6,7 +6,7 @@
 use cbox::core::spec::{ApplyOutcome, ApplySummary, BoxRow, DiffResult, ProvisionStepResult};
 use cbox::dbox::backend::Backend;
 use cbox::tui::effect::Effect;
-use cbox::tui::message::{Key, Message};
+use cbox::tui::message::{Key, Message, StopOutcome};
 use cbox::tui::model::{Model, Screen, StatusLine, WizardStep};
 use cbox::tui::update::update;
 
@@ -549,4 +549,72 @@ fn tick_advances_spinner() {
     assert_eq!(model.spinner_tick, 0);
     update(&mut model, Message::Tick);
     assert_eq!(model.spinner_tick, 1);
+}
+
+// ─── AC-STOP-TUI-1: pressing 's' on a selected box emits Effect::Stop ────────
+
+#[test]
+fn ac_stop_tui_1_s_emits_stop() {
+    let boxes = vec![make_running_box("web-dev")];
+    let mut model = make_model_with_boxes(boxes);
+    model.selected = Some(0);
+
+    let effects = update(&mut model, key_msg(Key::Char('s')));
+
+    assert!(
+        effects.iter().any(|e| matches!(
+            e,
+            Effect::Stop(spec)
+            if spec.names == vec!["web-dev"] && !spec.all
+        )),
+        "should emit Stop spec for web-dev"
+    );
+    assert!(model.busy, "should be busy while stopping");
+}
+
+// ─── AC-STOP-TUI-2: StopDone(Ok) updates status and triggers list refresh ────
+
+#[test]
+fn ac_stop_tui_2_stop_done_updates_model() {
+    let mut model = make_model();
+    model.busy = true;
+
+    let outcome = StopOutcome {
+        stopped: vec!["web-dev".to_string()],
+    };
+
+    let effects = update(&mut model, Message::StopDone(Ok(outcome)));
+
+    // handle_stop_done clears busy then immediately re-sets it for the LoadList
+    // refresh, so model.busy ends up true. The authoritative signal is the
+    // Ok status and the LoadList effect.
+    assert!(
+        matches!(model.status, StatusLine::Ok(_)),
+        "status should be Ok after successful stop"
+    );
+    assert!(
+        effects.iter().any(|e| matches!(e, Effect::LoadList)),
+        "should trigger a list refresh after stop"
+    );
+    assert!(model.busy, "busy should be re-set for the LoadList refresh");
+}
+
+// ─── AC-STOP-TUI-3: StopDone(Err) sets error status ─────────────────────────
+
+#[test]
+fn ac_stop_tui_3_stop_done_err_sets_error() {
+    use cbox::error::CboxError;
+
+    let mut model = make_model();
+    model.busy = true;
+
+    let err = CboxError::backend_error(1, "stop failed", &["distrobox".to_string()]);
+    let effects = update(&mut model, Message::StopDone(Err(err)));
+
+    assert!(!model.busy, "should not be busy after StopDone(Err)");
+    assert!(
+        matches!(model.status, StatusLine::Error(_)),
+        "status should be Error on stop failure"
+    );
+    assert!(effects.is_empty(), "no effects on error");
 }

@@ -7,7 +7,7 @@
 //!  - Effect completions clear `busy`, update the relevant Model field, set status.
 //!  - Key handling is screen-dispatched: match `model.screen` first, then the key.
 
-use crate::core::spec::{ApplySpec, DoctorSpec, EnterSpec, InspectSpec, RmSpec};
+use crate::core::spec::{ApplySpec, DoctorSpec, EnterSpec, InspectSpec, RmSpec, StopSpec};
 use crate::dbox::backend::Backend;
 use crate::error::CboxError;
 use crate::tui::effect::Effect;
@@ -45,6 +45,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Effect> {
         Message::DetailLoaded(result) => handle_detail_loaded(model, result),
         Message::CreateDone(result) => handle_create_done(model, result),
         Message::RmDone(result) => handle_rm_done(model, result),
+        Message::StopDone(result) => handle_stop_done(model, result),
         Message::ApplyDone(result) => handle_apply_done(model, result),
         Message::UpDone(result) => handle_up_done(model, result),
         Message::DoctorDone(result) => handle_doctor_done(model, result),
@@ -148,6 +149,20 @@ fn handle_key_list(model: &mut Model, key: Key) -> Vec<Effect> {
                 });
             }
             vec![]
+        }
+        Key::Char('s') => {
+            if let Some(row) = model.selected_box().cloned() {
+                let spec = StopSpec {
+                    names: vec![row.name.clone()],
+                    all: false,
+                    backend: backend_of(&row.backend, &model.backend),
+                };
+                model.busy = true;
+                model.status = StatusLine::Busy(format!("Stopping \"{}\"…", row.name));
+                vec![Effect::Stop(spec)]
+            } else {
+                vec![]
+            }
         }
         Key::Char('a') => {
             if let Some(row) = model.selected_box().cloned() {
@@ -729,6 +744,24 @@ fn handle_rm_done(
             model.status = StatusLine::Error(e.to_string());
             model.screen = Screen::List;
             model.progress = None;
+            vec![]
+        }
+    }
+}
+
+fn handle_stop_done(
+    model: &mut Model,
+    result: Result<crate::tui::message::StopOutcome, CboxError>,
+) -> Vec<Effect> {
+    model.busy = false;
+    match result {
+        Ok(outcome) => {
+            model.status = StatusLine::Ok(format!("Stopped: {}", outcome.stopped.join(", ")));
+            model.busy = true;
+            vec![Effect::LoadList]
+        }
+        Err(e) => {
+            model.status = StatusLine::Error(e.to_string());
             vec![]
         }
     }

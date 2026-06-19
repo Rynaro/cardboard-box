@@ -535,7 +535,7 @@ mod inner {
 
     fn render_status_bar(model: &Model, frame: &mut Frame, area: ratatui::layout::Rect) {
         let help =
-            "↑↓ move · enter open · c create · d destroy · a apply · e edit · ? doctor · q quit";
+            "↑↓ move · enter open · c create · s stop · d destroy · a apply · e edit · ? doctor · q quit";
 
         let (status_text, style) = match &model.status {
             StatusLine::Idle => (help.to_string(), Style::default().fg(Color::DarkGray)),

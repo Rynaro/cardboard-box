@@ -38,6 +38,11 @@ pub struct RmOutcome {
     pub removed: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct StopOutcome {
+    pub stopped: Vec<String>,
+}
+
 /// Every input the reducer understands.
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -52,6 +57,7 @@ pub enum Message {
     DetailLoaded(Result<InspectResult, CboxError>),
     CreateDone(Result<CreateOutcome, CboxError>),
     RmDone(Result<RmOutcome, CboxError>),
+    StopDone(Result<StopOutcome, CboxError>),
     ApplyDone(Result<ApplyOutcome, CboxError>),
     UpDone(Result<UpOutcome, CboxError>),
     DoctorDone(Result<DoctorResult, CboxError>),
