@@ -2,7 +2,7 @@
   "eidolon": "kupo",
   "version": "1.1.1",
   "methodology": "KUPO",
-  "installed_at": "2026-06-16T23:10:36Z",
+  "installed_at": "2026-06-18T18:04:01Z",
   "target": "/home/rynaro/workspace/oss/cardboard-box/.eidolons/kupo",
   "hosts_wired": [
     "claude-code"

@@ -21,7 +21,7 @@ SPECTRA ──(composition.md)────▶  IDG            # plan-only docs
 ATLAS  ──(composition.md)────▶  IDG            # read-only audits
 VIGIL  ──(roster:lateral)──────▶ SPECTRA / IDG / FORGE / ATLAS / APIVR-Δ
 FORGE  ──(composition.md:67-68)▶ <any caller>  # consultation return
-{ATLAS,SPECTRA,APIVR-Δ,FORGE,VIGIL} ─(roster:delegate)─▶ Kupo  # localized verifier-backed micro-task
+orchestrator ─(dispatch)─▶ Kupo  # localized ≤2-file verifier-backed micro-task; Eidolons FLAG, the orchestrator dispatches (subagents cannot spawn subagents)
 Kupo   ──(PROPOSE)──▶ <delegating parent>       # verified edit-proposal; parent applies & commits (Kupo never commits)
 ANY    ──(any)──▶  human                        # implicit terminal
 ```
@@ -30,12 +30,18 @@ Lateral edges are bidirectional; both directions are roster-declared via the lat
 (`vigil.handoffs.lateral: [atlas, spectra, apivr, idg, forge]`). VIGIL→{atlas,spectra,apivr,idg,forge}
 edges previously marked `[DISPUTED]` (OQ-3) are now confirmed roster-declared.
 
-**Kupo (executor) delegation edges** are roster-declared via `kupo.handoffs.upstream:
-[spectra, vigil, forge, apivr, atlas]` and the per-edge ECL contracts (`<from>-to-kupo.yaml`
-inbound DELEGATE; `kupo-to-<from>.yaml` outbound PROPOSE/INFORM/ESCALATE/REFUSE). `kupo→atlas`
-carries no PROPOSE (a read-only scout cannot apply a patch). Kupo is a **delegation target**, not a
-chain step — it replies only to the delegating parent and never routes work onward (worker-never-router).
-The `vivi↔kupo` edges are deferred until the Vivi succession lands. (`in_construction` until eval-gated.)
+**Kupo (executor) is orchestrator-dispatched.** No Eidolon subagent can spawn Kupo
+— subagents have no `Agent`/`Task` tool, so the **orchestrator is Kupo's only runtime
+dispatcher**. An Eidolon may FLAG a localized micro-task in its hand-off report; the
+orchestrator reads that flag and dispatches Kupo (orchestrator-brokered). The
+conceptual `<from>→kupo` / `kupo→<from>` edges in `kupo.handoffs.upstream`
+[spectra, vigil, forge, vivi, apivr, atlas] and the per-edge ECL contracts
+(`<from>-to-kupo.yaml` DELEGATE; `kupo-to-<from>.yaml` PROPOSE/INFORM/ESCALATE/REFUSE)
+remain the **wire-contract identity** for the artifact each Eidolon flags — they
+describe the *artifact shape and authorship*, not a runtime subagent-spawn.
+`kupo→atlas` carries no PROPOSE (a read-only scout's flagged task cannot be applied
+by the scout). Kupo is a **worker, never a router** — it replies to the orchestrator
+that dispatched it.
 
 ---
 

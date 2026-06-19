@@ -3,7 +3,7 @@
   "version": "1.12.1",
   "methodology": "ATLAS",
   "canonical_inventory_strict": true,
-  "installed_at": "2026-06-16T23:10:29Z",
+  "installed_at": "2026-06-18T18:03:55Z",
   "target": "./.eidolons/atlas",
   "spec_file": ".eidolons/atlas/SPEC.md",
   "hosts_wired": [
@@ -102,9 +102,9 @@
     },
     {
       "path": "AGENTS.md",
-      "sha256": "ea5b0ec105ad442fc3d809eee0d252472badeead6370da27ad26a02056df9850",
+      "sha256": "b5d9c1419bbce9a480ae603bbd291ef28dc946c9b89ebe649ec1002d7355401a",
       "role": "dispatch",
-      "mode": "created"
+      "mode": "appended"
     },
     {
       "path": "./.eidolons/atlas/skills/traverse.md",
@@ -192,9 +192,9 @@
     },
     {
       "path": "CLAUDE.md",
-      "sha256": "ea5b0ec105ad442fc3d809eee0d252472badeead6370da27ad26a02056df9850",
+      "sha256": "e17f5c10e04345e7b25b6933a08b1cd05d1ad49d835f5a84bc79a2d75225bedb",
       "role": "dispatch",
-      "mode": "created"
+      "mode": "appended"
     },
     {
       "path": ".claude/agents/atlas.md",

@@ -2,7 +2,7 @@
   "eidolon": "idg",
   "version": "1.8.1",
   "methodology": "IDG",
-  "installed_at": "2026-06-16T23:10:33Z",
+  "installed_at": "2026-06-18T18:03:58Z",
   "target": "/home/rynaro/workspace/oss/cardboard-box/.eidolons/idg",
   "hosts_wired": [
     "claude-code"
