@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/Rynaro/cardboard-box/compare/v0.5.1...v0.5.2) (2026-06-19)
+
+
+### Bug Fixes
+
+* **diff:** normalize mount mode so default rw is not a spurious recreate ([#20](https://github.com/Rynaro/cardboard-box/issues/20)) ([e90f19d](https://github.com/Rynaro/cardboard-box/commit/e90f19d2c4fe4b78c3d8d7180d3812c676113947))
+
 ## [0.5.1](https://github.com/Rynaro/cardboard-box/compare/v0.5.0...v0.5.1) (2026-06-18)
 
 
