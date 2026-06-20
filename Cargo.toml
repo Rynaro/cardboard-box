@@ -15,7 +15,7 @@ path = "src/lib.rs"
 
 [features]
 default = ["tui"]
-tui = ["dep:ratatui", "dep:crossterm"]
+tui = ["dep:ratatui", "dep:crossterm", "dep:nucleo-matcher"]
 testkit = []
 
 [dependencies]
@@ -39,6 +39,9 @@ keyring = { version = "3", default-features = false, features = [
 rpassword = "7"
 ratatui = { version = "0.28", optional = true }
 crossterm = { version = "0.28", optional = true }
+# nucleo-matcher: pure Rust fuzzy matcher (Helix-grade); gated under `tui` so the
+# lean build (make lint-lean / no-default-features) stays clean (D-2).
+nucleo-matcher = { version = "0.3", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

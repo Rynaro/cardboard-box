@@ -8,7 +8,7 @@
 use cbox::tui::strings;
 use cbox::tui::theme::{
     badge_glyph, badge_label, classify_status, detect_from, header_should_collapse, BadgeKind,
-    ColorMode, Theme, HEADER_COLLAPSE_WIDTH,
+    ColorMode, Skin, Theme, HEADER_COLLAPSE_WIDTH,
 };
 
 // ─── AC-THEME-1: color mode detection ────────────────────────────────────────
@@ -61,7 +61,7 @@ fn ac_theme_1_plain_term_fallback_to_ansi16() {
 #[test]
 fn ac_theme_2_truecolor_accent_rgb() {
     use ratatui::style::Color;
-    let theme = Theme::resolve(ColorMode::TrueColor);
+    let theme = Theme::resolve(Skin::Kraft, ColorMode::TrueColor);
     assert_eq!(
         theme.accent.fg,
         Some(Color::Rgb(214, 158, 92)),
@@ -72,7 +72,7 @@ fn ac_theme_2_truecolor_accent_rgb() {
 #[test]
 fn ac_theme_2_ansi16_accent_yellow() {
     use ratatui::style::Color;
-    let theme = Theme::resolve(ColorMode::Ansi16);
+    let theme = Theme::resolve(Skin::Kraft, ColorMode::Ansi16);
     assert_eq!(
         theme.accent.fg,
         Some(Color::Yellow),
@@ -80,13 +80,69 @@ fn ac_theme_2_ansi16_accent_yellow() {
     );
 }
 
-// ─── AC-THEME-3: NoColor P0 invariant ────────────────────────────────────────
+// ─── AC-SKIN-1: skin-specific accent anchors ─────────────────────────────────
 
-/// Every style field in `Theme::resolve(NoColor)` must have fg==None && bg==None.
-/// Differentiation is only via Modifier.
 #[test]
-fn ac_theme_3_nocolor_no_fg_bg_anywhere() {
-    let theme = Theme::resolve(ColorMode::NoColor);
+fn ac_skin_1_kraft_truecolor_accent() {
+    use ratatui::style::Color;
+    let theme = Theme::resolve(Skin::Kraft, ColorMode::TrueColor);
+    assert_eq!(
+        theme.accent.fg,
+        Some(Color::Rgb(214, 158, 92)),
+        "Kraft TrueColor accent must be Rgb(214,158,92)"
+    );
+}
+
+#[test]
+fn ac_skin_1_carbon_truecolor_accent() {
+    use ratatui::style::Color;
+    let theme = Theme::resolve(Skin::Carbon, ColorMode::TrueColor);
+    assert_eq!(
+        theme.accent.fg,
+        Some(Color::Rgb(160, 170, 180)),
+        "Carbon TrueColor accent must be Rgb(160,170,180)"
+    );
+}
+
+#[test]
+fn ac_skin_1_blueprint_truecolor_accent() {
+    use ratatui::style::Color;
+    let theme = Theme::resolve(Skin::Blueprint, ColorMode::TrueColor);
+    assert_eq!(
+        theme.accent.fg,
+        Some(Color::Rgb(90, 170, 200)),
+        "Blueprint TrueColor accent must be Rgb(90,170,200)"
+    );
+}
+
+#[test]
+fn ac_skin_1_kraft_ansi16_accent_yellow() {
+    use ratatui::style::Color;
+    let theme = Theme::resolve(Skin::Kraft, ColorMode::Ansi16);
+    assert_eq!(theme.accent.fg, Some(Color::Yellow));
+}
+
+#[test]
+fn ac_skin_1_carbon_ansi16_accent_white() {
+    use ratatui::style::Color;
+    let theme = Theme::resolve(Skin::Carbon, ColorMode::Ansi16);
+    assert_eq!(theme.accent.fg, Some(Color::White));
+}
+
+#[test]
+fn ac_skin_1_blueprint_ansi16_accent_cyan() {
+    use ratatui::style::Color;
+    let theme = Theme::resolve(Skin::Blueprint, ColorMode::Ansi16);
+    assert_eq!(theme.accent.fg, Some(Color::Cyan));
+}
+
+// ─── AC-THEME-3 / AC-SKIN-NOCOLOR: NoColor P0 invariant for EVERY skin ───────
+
+/// For every skin, `Theme::resolve(skin, NoColor)` must have fg==None && bg==None
+/// for ALL 18 style fields.  The NoColor arm is skin-independent (same table),
+/// but we assert it for each skin to pin the guarantee mechanically (AC-SKIN-NOCOLOR).
+fn assert_nocolor_invariant(skin: Skin) {
+    let theme = Theme::resolve(skin, ColorMode::NoColor);
 
     let styles = [
         ("border", theme.border),
@@ -112,15 +168,64 @@ fn ac_theme_3_nocolor_no_fg_bg_anywhere() {
     for (name, style) in &styles {
         assert!(
             style.fg.is_none(),
-            "NoColor theme field `{name}` must have fg=None, got {:?}",
+            "NoColor theme field `{name}` (skin {:?}) must have fg=None, got {:?}",
+            skin,
             style.fg
         );
         assert!(
             style.bg.is_none(),
-            "NoColor theme field `{name}` must have bg=None, got {:?}",
+            "NoColor theme field `{name}` (skin {:?}) must have bg=None, got {:?}",
+            skin,
             style.bg
         );
     }
+}
+
+#[test]
+fn ac_theme_3_nocolor_no_fg_bg_anywhere() {
+    // Legacy name kept for continuity; now loops all skins (AC-SKIN-NOCOLOR).
+    for skin in [Skin::Kraft, Skin::Carbon, Skin::Blueprint] {
+        assert_nocolor_invariant(skin);
+    }
+}
+
+#[test]
+fn ac_skin_nocolor_kraft() {
+    assert_nocolor_invariant(Skin::Kraft);
+}
+
+#[test]
+fn ac_skin_nocolor_carbon() {
+    assert_nocolor_invariant(Skin::Carbon);
+}
+
+#[test]
+fn ac_skin_nocolor_blueprint() {
+    assert_nocolor_invariant(Skin::Blueprint);
+}
+
+// ─── AC-SKIN-CYCLE: skin cycle order ─────────────────────────────────────────
+
+#[test]
+fn ac_skin_cycle_kraft_to_carbon() {
+    assert_eq!(Skin::Kraft.next(), Skin::Carbon);
+}
+
+#[test]
+fn ac_skin_cycle_carbon_to_blueprint() {
+    assert_eq!(Skin::Carbon.next(), Skin::Blueprint);
+}
+
+#[test]
+fn ac_skin_cycle_blueprint_to_kraft() {
+    assert_eq!(Skin::Blueprint.next(), Skin::Kraft);
+}
+
+#[test]
+fn ac_skin_name_all() {
+    assert_eq!(Skin::Kraft.name(), "kraft");
+    assert_eq!(Skin::Carbon.name(), "carbon");
+    assert_eq!(Skin::Blueprint.name(), "blueprint");
 }
 
 // ─── AC-BADGE-1: classify_status ─────────────────────────────────────────────
@@ -198,7 +303,7 @@ fn ac_badge_2_unknown_glyph_label() {
 #[test]
 fn ac_badge_2_badge_span_running_style() {
     use cbox::tui::theme::badge_span;
-    let theme = Theme::resolve(ColorMode::TrueColor);
+    let theme = Theme::resolve(Skin::Kraft, ColorMode::TrueColor);
     let span = badge_span("running", &theme);
     assert_eq!(span.style, theme.badge_running);
     assert!(span.content.contains("●"));
@@ -208,7 +313,7 @@ fn ac_badge_2_badge_span_running_style() {
 #[test]
 fn ac_badge_2_badge_span_stopped_style() {
     use cbox::tui::theme::badge_span;
-    let theme = Theme::resolve(ColorMode::TrueColor);
+    let theme = Theme::resolve(Skin::Kraft, ColorMode::TrueColor);
     let span = badge_span("exited (0)", &theme);
     assert_eq!(span.style, theme.badge_stopped);
     assert!(span.content.contains("○"));
@@ -268,6 +373,10 @@ fn ac_copy_1_all_consts_non_empty_and_compliant() {
         ("PROGRESS_DONE", strings::PROGRESS_DONE),
         ("ERROR_PREFIX", strings::ERROR_PREFIX),
         ("HELP", strings::HELP),
+        // Bundle 1: command-log copy consts (R-7 — must be voice-compliant).
+        ("CMDLOG_TITLE", strings::CMDLOG_TITLE),
+        ("CMDLOG_EMPTY", strings::CMDLOG_EMPTY),
+        ("CMDLOG_HINT", strings::CMDLOG_HINT),
     ];
 
     for (name, value) in consts {

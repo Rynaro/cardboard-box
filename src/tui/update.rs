@@ -6,6 +6,7 @@
 //!    and Ctrl-C → Quit.
 //!  - Effect completions clear `busy`, update the relevant Model field, set status.
 //!  - Key handling is screen-dispatched: match `model.screen` first, then the key.
+//!  - Overlay pre-check runs BEFORE screen dispatch (§4.3 of the spec).
 
 use crate::core::spec::{ApplySpec, DoctorSpec, EnterSpec, InspectSpec, RmSpec, StopSpec};
 use crate::dbox::backend::Backend;
@@ -13,9 +14,13 @@ use crate::error::CboxError;
 use crate::tui::effect::Effect;
 use crate::tui::message::{Key, Message};
 use crate::tui::model::{
-    ConfirmState, Model, ProgressState, Screen, StatusLine, WizardState, WizardStep,
+    ConfirmState, FilterState, Model, Overlay, ProgressState, Screen, StatusLine, WizardState,
+    WizardStep,
 };
 use crate::tui::strings;
+
+#[cfg(feature = "tui")]
+use crate::tui::filter::fuzzy_rank;
 
 /// Resolve a box's engine from its stored backend string, falling back to the
 /// create default when it's missing/unknown (e.g. mock rows in tests).
@@ -26,12 +31,17 @@ fn backend_of(row_backend: &str, fallback: &Backend) -> Backend {
 /// The pure reducer. Returns a list of effects for the shell to execute.
 pub fn update(model: &mut Model, msg: Message) -> Vec<Effect> {
     match msg {
-        // ── Tick: advance spinner ──────────────────────────────────────────────
+        // ── Tick: advance spinner, expire toasts ──────────────────────────────
         Message::Tick => {
             model.spinner_tick = model.spinner_tick.wrapping_add(1);
             if let Some(ref mut p) = model.progress {
                 p.spinner_tick = model.spinner_tick;
             }
+            // Expire toasts that have outlived their TTL.
+            let now = model.spinner_tick;
+            model
+                .toasts
+                .retain(|t| now.wrapping_sub(t.born_tick) < t.ttl_ticks);
             vec![]
         }
 
@@ -58,17 +68,54 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Effect> {
 // ─── Key dispatch ────────────────────────────────────────────────────────────
 
 fn handle_key(model: &mut Model, key: Key) -> Vec<Effect> {
-    // Ctrl-C always quits, even when busy.
+    // 1. Ctrl-C / Ctrl-D always quits, even when busy.
     if key == Key::CtrlC || key == Key::CtrlD {
         model.should_quit = true;
         return vec![Effect::Quit];
     }
 
-    // When busy, drop all other keys (spinner is shown; the worker is running).
+    // 2. When busy, drop all other keys (spinner is shown; the worker is running).
     if model.busy {
         return vec![];
     }
 
+    // 3. If the filter overlay is open, intercept ALL keys for filter input.
+    if model.filter.is_some() {
+        return handle_key_filter(model, key);
+    }
+
+    // 4. Overlay pre-check — handles overlays before screen dispatch so `esc`
+    //    closes the overlay rather than quitting.
+    match &model.overlay.clone() {
+        Overlay::None => {}
+        Overlay::Cheatsheet => {
+            // Any key or Esc dismisses the cheatsheet.
+            model.overlay = Overlay::None;
+            return vec![];
+        }
+        Overlay::CommandLog { scroll } => {
+            let scroll = *scroll;
+            return handle_key_cmdlog(model, key, scroll);
+        }
+    }
+
+    // 5. Global keys (available on every non-busy screen): skin cycle, cheatsheet.
+    match key {
+        Key::Char('t') => {
+            let next = model.skin.next();
+            model.skin = next;
+            let name = format!("Skin: {}", next.name());
+            model.push_toast(crate::tui::model::ToastKind::Info, name);
+            return vec![];
+        }
+        Key::Char('?') => {
+            model.overlay = Overlay::Cheatsheet;
+            return vec![];
+        }
+        _ => {}
+    }
+
+    // 6. Screen dispatch (existing behavior + new List arms).
     match model.screen {
         Screen::List => handle_key_list(model, key),
         Screen::Detail => handle_key_detail(model, key),
@@ -76,6 +123,128 @@ fn handle_key(model: &mut Model, key: Key) -> Vec<Effect> {
         Screen::ConfirmDestroy => handle_key_confirm(model, key),
         Screen::Progress => handle_key_progress(model, key),
         Screen::DoctorPanel => handle_key_doctor(model, key),
+    }
+}
+
+// ─── Filter overlay key handler ───────────────────────────────────────────────
+
+fn handle_key_filter(model: &mut Model, key: Key) -> Vec<Effect> {
+    match key {
+        Key::Esc => {
+            // Clear filter; restore selection.
+            let prev_selected = model.filter.as_ref().and_then(|f| {
+                if f.matches.is_empty() {
+                    None
+                } else {
+                    Some(f.matches[f.cursor])
+                }
+            });
+            model.filter = None;
+            // Restore a sensible selection (previous box if still present, else 0).
+            if let Some(idx) = prev_selected {
+                if idx < model.boxes.len() {
+                    model.selected = Some(idx);
+                } else if !model.boxes.is_empty() {
+                    model.selected = Some(0);
+                } else {
+                    model.selected = None;
+                }
+            }
+            vec![]
+        }
+        Key::Enter => {
+            // Commit the current selection and close the filter.
+            // model.selected is already synced to the correct box index.
+            model.filter = None;
+            vec![]
+        }
+        Key::Up => {
+            model.move_up();
+            vec![]
+        }
+        Key::Down => {
+            model.move_down();
+            vec![]
+        }
+        Key::Backspace => {
+            if let Some(ref mut f) = model.filter {
+                f.query.pop();
+                let query = f.query.clone();
+                recompute_filter(model, &query);
+            }
+            vec![]
+        }
+        Key::Char(c) => {
+            // In FilterInput: ALL chars (including j/k) are typed into the query.
+            // Navigation within matches is ↑/↓ ONLY (§4.4 of the spec, R-8).
+            if let Some(ref mut f) = model.filter {
+                f.query.push(c);
+                let query = f.query.clone();
+                recompute_filter(model, &query);
+            }
+            vec![]
+        }
+        _ => vec![],
+    }
+}
+
+/// Recompute `filter.matches` from the current query and clamp `filter.cursor`.
+/// Also updates `model.selected` to reflect the new cursor position.
+fn recompute_filter(model: &mut Model, query: &str) {
+    let names: Vec<&str> = model.boxes.iter().map(|b| b.name.as_str()).collect();
+
+    // Use the tui-gated fuzzy_rank when the feature is on.
+    #[cfg(feature = "tui")]
+    let matches = fuzzy_rank(query, &names);
+
+    // Fallback for non-tui builds (substring match, keeps lean build clean).
+    #[cfg(not(feature = "tui"))]
+    let matches: Vec<usize> = if query.is_empty() {
+        (0..names.len()).collect()
+    } else {
+        names
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| n.to_lowercase().contains(&query.to_lowercase()))
+            .map(|(i, _)| i)
+            .collect()
+    };
+
+    if let Some(ref mut f) = model.filter {
+        f.matches = matches;
+        // Clamp cursor to valid range.
+        if f.matches.is_empty() {
+            f.cursor = 0;
+            model.selected = None;
+        } else {
+            f.cursor = f.cursor.min(f.matches.len() - 1);
+            model.selected = Some(f.matches[f.cursor]);
+        }
+    }
+}
+
+// ─── Command-log overlay key handler ──────────────────────────────────────────
+
+fn handle_key_cmdlog(model: &mut Model, key: Key, scroll: usize) -> Vec<Effect> {
+    match key {
+        Key::Esc | Key::Char('q') | Key::Char('l') => {
+            model.overlay = Overlay::None;
+            vec![]
+        }
+        Key::Up | Key::Char('k') => {
+            let new_scroll = scroll.saturating_sub(1);
+            model.overlay = Overlay::CommandLog { scroll: new_scroll };
+            vec![]
+        }
+        Key::Down | Key::Char('j') => {
+            // Get the log entry count under the lock.
+            let entry_count = model.cmdlog.lock().map(|log| log.len()).unwrap_or(0);
+            let max_scroll = entry_count.saturating_sub(1);
+            let new_scroll = (scroll + 1).min(max_scroll);
+            model.overlay = Overlay::CommandLog { scroll: new_scroll };
+            vec![]
+        }
+        _ => vec![],
     }
 }
 
@@ -195,13 +364,35 @@ fn handle_key_list(model: &mut Model, key: Key) -> Vec<Effect> {
             model.status = StatusLine::Busy("Refreshing…".to_string());
             vec![Effect::LoadList]
         }
-        Key::Char('?') => {
+        // Doctor moved from `?` to uppercase `D` (AC-REBIND-1).
+        Key::Char('D') => {
             model.screen = Screen::DoctorPanel;
             model.busy = true;
             model.status = StatusLine::Busy("Running doctor…".to_string());
             vec![Effect::Doctor(DoctorSpec {
                 backend_override: None,
             })]
+        }
+        // `/` opens the fuzzy filter overlay.
+        Key::Char('/') => {
+            // Close any existing overlay when opening filter.
+            model.overlay = Overlay::None;
+            let names: Vec<&str> = model.boxes.iter().map(|b| b.name.as_str()).collect();
+            let all_indices: Vec<usize> = (0..names.len()).collect();
+            model.filter = Some(FilterState {
+                query: String::new(),
+                matches: all_indices,
+                cursor: model
+                    .selected
+                    .unwrap_or(0)
+                    .min(model.boxes.len().saturating_sub(1)),
+            });
+            vec![]
+        }
+        // `l` opens the command-log overlay.
+        Key::Char('l') => {
+            model.overlay = Overlay::CommandLog { scroll: 0 };
+            vec![]
         }
         Key::Char('q') | Key::Esc => {
             model.should_quit = true;
@@ -656,6 +847,11 @@ fn handle_list_loaded(
             if model.selected.is_none() && !model.boxes.is_empty() {
                 model.selected = Some(0);
             }
+            // If a filter is open, recompute matches against the new rows.
+            if model.filter.is_some() {
+                let query = model.filter.as_ref().unwrap().query.clone();
+                recompute_filter(model, &query);
+            }
             model.status = StatusLine::Ok(strings::loaded(model.boxes.len()));
             vec![]
         }
@@ -685,12 +881,13 @@ fn handle_detail_loaded(
     model.busy = false;
     match result {
         Ok(detail) => {
-            model.status = StatusLine::Ok(format!("Inspected \"{}\"", detail.name));
+            let msg = format!("Inspected \"{}\"", detail.name);
+            model.set_status_ok(msg);
             model.detail = Some(detail);
             vec![]
         }
         Err(e) => {
-            model.status = StatusLine::Error(e.to_string());
+            model.set_status_error(e.to_string());
             model.screen = Screen::List;
             vec![]
         }
@@ -704,7 +901,8 @@ fn handle_create_done(
     model.busy = false;
     match result {
         Ok(outcome) => {
-            model.status = StatusLine::Ok(strings::created(&outcome.name));
+            let msg = strings::created(&outcome.name);
+            model.set_status_ok(msg);
             model.screen = Screen::List;
             model.progress = None;
             // Refresh the list.
@@ -712,7 +910,7 @@ fn handle_create_done(
             vec![Effect::LoadList]
         }
         Err(e) => {
-            model.status = StatusLine::Error(e.to_string());
+            model.set_status_error(e.to_string());
             model.screen = Screen::List;
             model.progress = None;
             vec![]
@@ -727,7 +925,8 @@ fn handle_rm_done(
     model.busy = false;
     match result {
         Ok(outcome) => {
-            model.status = StatusLine::Ok(strings::removed(&outcome.removed.join(", ")));
+            let msg = strings::removed(&outcome.removed.join(", "));
+            model.set_status_ok(msg);
             model.screen = Screen::List;
             model.progress = None;
             model.selected = None;
@@ -735,7 +934,7 @@ fn handle_rm_done(
             vec![Effect::LoadList]
         }
         Err(e) => {
-            model.status = StatusLine::Error(e.to_string());
+            model.set_status_error(e.to_string());
             model.screen = Screen::List;
             model.progress = None;
             vec![]
@@ -750,12 +949,13 @@ fn handle_stop_done(
     model.busy = false;
     match result {
         Ok(outcome) => {
-            model.status = StatusLine::Ok(strings::stopped(&outcome.stopped.join(", ")));
+            let msg = strings::stopped(&outcome.stopped.join(", "));
+            model.set_status_ok(msg);
             model.busy = true;
             vec![Effect::LoadList]
         }
         Err(e) => {
-            model.status = StatusLine::Error(e.to_string());
+            model.set_status_error(e.to_string());
             vec![]
         }
     }
@@ -768,12 +968,13 @@ fn handle_apply_done(
     model.busy = false;
     match result {
         Ok(outcome) => {
-            model.status = StatusLine::Ok(strings::applied(
+            let msg = strings::applied(
                 &outcome.name,
                 outcome.summary.ran,
                 outcome.summary.skipped,
                 outcome.summary.failed,
-            ));
+            );
+            model.set_status_ok(msg);
             if let Some(ref mut p) = model.progress {
                 p.steps = outcome.steps;
             }
@@ -789,9 +990,9 @@ fn handle_apply_done(
                     p.recreate_msg = Some(msg.clone());
                     p.recreate_confirm = true;
                 }
-                model.status = StatusLine::Error(msg);
+                model.set_status_error(msg);
             } else {
-                model.status = StatusLine::Error(e.to_string());
+                model.set_status_error(e.to_string());
                 model.screen = Screen::List;
                 model.progress = None;
             }
@@ -812,14 +1013,15 @@ fn handle_up_done(
             } else {
                 "Applied"
             };
-            model.status = StatusLine::Ok(format!("{} \"{}\"", action, outcome.name));
+            let msg = format!("{} \"{}\"", action, outcome.name);
+            model.set_status_ok(msg);
             if let Some(ref mut p) = model.progress {
                 p.steps = outcome.apply.steps;
             }
             vec![]
         }
         Err(e) => {
-            model.status = StatusLine::Error(e.to_string());
+            model.set_status_error(e.to_string());
             model.screen = Screen::List;
             model.progress = None;
             vec![]
@@ -836,10 +1038,11 @@ fn handle_doctor_done(
         Ok(dr) => {
             model.doctor = Some(dr);
             model.status = StatusLine::Ok("Doctor complete".to_string());
+            // Doctor completion sets status only (no toast — informational, not an op result).
             vec![]
         }
         Err(e) => {
-            model.status = StatusLine::Error(e.to_string());
+            model.set_status_error(e.to_string());
             vec![]
         }
     }
@@ -850,13 +1053,13 @@ fn handle_enter_returned(model: &mut Model, result: Result<i32, CboxError>) -> V
     match result {
         Ok(code) => {
             if code == 0 {
-                model.status = StatusLine::Ok("Returned from box".to_string());
+                model.set_status_ok("Returned from box".to_string());
             } else {
-                model.status = StatusLine::Error(format!("Box exited with code {code}"));
+                model.set_status_error(format!("Box exited with code {code}"));
             }
         }
         Err(e) => {
-            model.status = StatusLine::Error(e.to_string());
+            model.set_status_error(e.to_string());
         }
     }
     // Refresh after enter.
@@ -868,10 +1071,10 @@ fn handle_edit_returned(model: &mut Model, result: Result<(), CboxError>) -> Vec
     model.pending_edit = None;
     match result {
         Ok(()) => {
-            model.status = StatusLine::Ok("Boxfile saved".to_string());
+            model.set_status_ok("Boxfile saved".to_string());
         }
         Err(e) => {
-            model.status = StatusLine::Error(e.to_string());
+            model.set_status_error(e.to_string());
         }
     }
     vec![]

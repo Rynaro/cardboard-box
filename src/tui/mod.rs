@@ -5,10 +5,16 @@
 // All TUI internals live behind the `tui` feature so the lean (default-off) build
 // compiles cleanly with no dead code. Only `TuiConfig` + the stub `run` below are
 // always present (the CLI entry point references them unconditionally).
+// keymap is ungated — pure data, consumed by cheatsheet overlay AND status bar.
+pub mod keymap;
+// cmdlog is ungated — pure ring buffer; the LoggingRunner decorator inside it is tui-gated.
 #[cfg(feature = "tui")]
 pub mod app;
+pub mod cmdlog;
 #[cfg(feature = "tui")]
 pub mod effect;
+#[cfg(feature = "tui")]
+pub mod filter;
 #[cfg(feature = "tui")]
 pub mod message;
 #[cfg(feature = "tui")]

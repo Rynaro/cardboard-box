@@ -1,6 +1,6 @@
 //! Theme tokens + color-mode resolution for the TUI.
 //!
-//! `ColorMode` and `detect_from` are always compiled (no feature gate) so
+//! `ColorMode`, `Skin`, and `detect_from` are always compiled (no feature gate) so
 //! unit tests can import them without the full ratatui dep.
 //! `Theme` and `Theme::resolve` are gated behind `#[cfg(feature = "tui")]`
 //! because they hold ratatui `Style` values.
@@ -71,6 +71,43 @@ pub fn detect(no_color_flag: bool) -> ColorMode {
     )
 }
 
+// ─── Skin ─────────────────────────────────────────────────────────────────────
+
+/// Named palette/skin for the TUI. Cycles with the `t` key.
+///
+/// `Skin` is always compiled (no feature gate) so tests can import it and
+/// assert the cycle/name invariants without ratatui.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Skin {
+    /// Kraft amber (the shipped default retro look). UNCHANGED from pre-bundle-1.
+    #[default]
+    Kraft,
+    /// Carbon: dark slate / cool-gray, low-chroma.
+    Carbon,
+    /// Blueprint: cyan-on-dark drafting palette.
+    Blueprint,
+}
+
+impl Skin {
+    /// Cycle to the next skin: Kraft → Carbon → Blueprint → Kraft.
+    pub fn next(self) -> Skin {
+        match self {
+            Skin::Kraft => Skin::Carbon,
+            Skin::Carbon => Skin::Blueprint,
+            Skin::Blueprint => Skin::Kraft,
+        }
+    }
+
+    /// Short lowercase name shown in the toast when cycling (e.g. `"kraft"`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Skin::Kraft => "kraft",
+            Skin::Carbon => "carbon",
+            Skin::Blueprint => "blueprint",
+        }
+    }
+}
+
 // ─── Theme ────────────────────────────────────────────────────────────────────
 
 #[cfg(feature = "tui")]
@@ -80,11 +117,11 @@ pub use theme_inner::Theme;
 mod theme_inner {
     use ratatui::style::{Color, Modifier, Style};
 
-    use super::ColorMode;
+    use super::{ColorMode, Skin};
 
     /// All named style tokens for the TUI.
     ///
-    /// Build once per frame via `Theme::resolve(model.color_mode)` and pass `&theme`
+    /// Build once per frame via `Theme::resolve(model.skin, model.color_mode)` and pass `&theme`
     /// into each `render_*` fn. Never stored as a global or static.
     ///
     /// Some fields are not yet consumed in the current view pass but are part of the
@@ -124,19 +161,30 @@ mod theme_inner {
     }
 
     impl Theme {
-        /// Build the full token table for the given color mode.
+        /// Build the full token table for the given skin and color mode.
         /// Pure — no I/O. Unit-testable.
-        pub fn resolve(mode: ColorMode) -> Self {
+        ///
+        /// NoColor arm is **skin-independent**: all skins collapse to the same
+        /// zero-fg/bg modifier-only table. This is the P0 invariant (AC-SKIN-NOCOLOR).
+        pub fn resolve(skin: Skin, mode: ColorMode) -> Self {
             match mode {
-                ColorMode::TrueColor => Self::truecolor(),
-                ColorMode::Ansi16 => Self::ansi16(),
                 ColorMode::NoColor => Self::nocolor(),
+                ColorMode::TrueColor => match skin {
+                    Skin::Kraft => Self::kraft_truecolor(),
+                    Skin::Carbon => Self::carbon_truecolor(),
+                    Skin::Blueprint => Self::blueprint_truecolor(),
+                },
+                ColorMode::Ansi16 => match skin {
+                    Skin::Kraft => Self::kraft_ansi16(),
+                    Skin::Carbon => Self::carbon_ansi16(),
+                    Skin::Blueprint => Self::blueprint_ansi16(),
+                },
             }
         }
 
-        // ── kraft / retro palette ─────────────────────────────────────────────
+        // ── Kraft / retro palette (default, UNCHANGED) ────────────────────────
 
-        fn truecolor() -> Self {
+        fn kraft_truecolor() -> Self {
             let accent = Style::default().fg(Color::Rgb(214, 158, 92));
             let accent_dim = Style::default().fg(Color::Rgb(150, 110, 66));
             let success = Style::default().fg(Color::Rgb(126, 184, 108));
@@ -176,7 +224,7 @@ mod theme_inner {
             }
         }
 
-        fn ansi16() -> Self {
+        fn kraft_ansi16() -> Self {
             Theme {
                 mode: ColorMode::Ansi16,
                 border: Style::default().fg(Color::DarkGray),
@@ -209,8 +257,161 @@ mod theme_inner {
             }
         }
 
-        /// NoColor invariant (P0): NO style carries any fg/bg color.
+        // ── Carbon palette (dark slate / cool-gray) ───────────────────────────
+
+        fn carbon_truecolor() -> Self {
+            let accent = Style::default().fg(Color::Rgb(160, 170, 180)); // AC-SKIN-1 anchor
+            let accent_dim = Style::default().fg(Color::Rgb(110, 118, 128));
+            let success = Style::default().fg(Color::Rgb(120, 180, 140));
+            let warning = Style::default().fg(Color::Rgb(210, 180, 110));
+            let danger = Style::default().fg(Color::Rgb(205, 100, 95));
+            let muted = Style::default().fg(Color::Rgb(100, 106, 115));
+
+            Theme {
+                mode: ColorMode::TrueColor,
+                border: Style::default().fg(Color::Rgb(80, 86, 94)),
+                border_focus: Style::default().fg(Color::Rgb(160, 170, 180)),
+                title: Style::default()
+                    .fg(Color::Rgb(160, 170, 180))
+                    .add_modifier(Modifier::BOLD),
+                accent,
+                accent_dim,
+                success,
+                warning,
+                danger,
+                muted,
+                header_cell: Style::default()
+                    .fg(Color::Rgb(160, 170, 180))
+                    .add_modifier(Modifier::BOLD),
+                selection: Style::default()
+                    .bg(Color::Rgb(40, 44, 50))
+                    .fg(Color::Rgb(220, 224, 230))
+                    .add_modifier(Modifier::BOLD),
+                brand_logo: Style::default().fg(Color::Rgb(160, 170, 180)),
+                brand_name: Style::default()
+                    .fg(Color::Rgb(160, 170, 180))
+                    .add_modifier(Modifier::BOLD),
+                brand_tagline: Style::default().fg(Color::Rgb(100, 106, 115)),
+                badge_running: Style::default().fg(Color::Rgb(120, 180, 140)),
+                badge_stopped: Style::default().fg(Color::Rgb(100, 106, 115)),
+                badge_error: Style::default().fg(Color::Rgb(205, 100, 95)),
+                badge_unknown: Style::default().fg(Color::Rgb(110, 118, 128)),
+            }
+        }
+
+        fn carbon_ansi16() -> Self {
+            Theme {
+                mode: ColorMode::Ansi16,
+                border: Style::default().fg(Color::DarkGray),
+                border_focus: Style::default().fg(Color::White),
+                title: Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+                accent: Style::default().fg(Color::White), // AC-SKIN-1 anchor
+                accent_dim: Style::default().fg(Color::Gray),
+                success: Style::default().fg(Color::Green),
+                warning: Style::default().fg(Color::Yellow),
+                danger: Style::default().fg(Color::Red),
+                muted: Style::default().fg(Color::DarkGray),
+                header_cell: Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+                selection: Style::default()
+                    .bg(Color::Blue)
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+                brand_logo: Style::default().fg(Color::White),
+                brand_name: Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+                brand_tagline: Style::default().fg(Color::DarkGray),
+                badge_running: Style::default().fg(Color::Green),
+                badge_stopped: Style::default().fg(Color::DarkGray),
+                badge_error: Style::default().fg(Color::Red),
+                badge_unknown: Style::default().fg(Color::DarkGray),
+            }
+        }
+
+        // ── Blueprint palette (cyan-on-dark drafting look) ────────────────────
+
+        fn blueprint_truecolor() -> Self {
+            let accent = Style::default().fg(Color::Rgb(90, 170, 200)); // AC-SKIN-1 anchor
+            let accent_dim = Style::default().fg(Color::Rgb(60, 120, 150));
+            let success = Style::default().fg(Color::Rgb(110, 190, 160));
+            let warning = Style::default().fg(Color::Rgb(220, 180, 90));
+            let danger = Style::default().fg(Color::Rgb(210, 95, 90));
+            let muted = Style::default().fg(Color::Rgb(90, 110, 130));
+
+            Theme {
+                mode: ColorMode::TrueColor,
+                border: Style::default().fg(Color::Rgb(60, 100, 130)),
+                border_focus: Style::default().fg(Color::Rgb(90, 170, 200)),
+                title: Style::default()
+                    .fg(Color::Rgb(90, 170, 200))
+                    .add_modifier(Modifier::BOLD),
+                accent,
+                accent_dim,
+                success,
+                warning,
+                danger,
+                muted,
+                header_cell: Style::default()
+                    .fg(Color::Rgb(90, 170, 200))
+                    .add_modifier(Modifier::BOLD),
+                selection: Style::default()
+                    .bg(Color::Rgb(20, 45, 60))
+                    .fg(Color::Rgb(210, 235, 245))
+                    .add_modifier(Modifier::BOLD),
+                brand_logo: Style::default().fg(Color::Rgb(90, 170, 200)),
+                brand_name: Style::default()
+                    .fg(Color::Rgb(90, 170, 200))
+                    .add_modifier(Modifier::BOLD),
+                brand_tagline: Style::default().fg(Color::Rgb(90, 110, 130)),
+                badge_running: Style::default().fg(Color::Rgb(110, 190, 160)),
+                badge_stopped: Style::default().fg(Color::Rgb(60, 120, 150)),
+                badge_error: Style::default().fg(Color::Rgb(210, 95, 90)),
+                badge_unknown: Style::default().fg(Color::Rgb(60, 100, 130)),
+            }
+        }
+
+        fn blueprint_ansi16() -> Self {
+            Theme {
+                mode: ColorMode::Ansi16,
+                border: Style::default().fg(Color::Blue),
+                border_focus: Style::default().fg(Color::Cyan),
+                title: Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+                accent: Style::default().fg(Color::Cyan), // AC-SKIN-1 anchor
+                accent_dim: Style::default().fg(Color::Blue),
+                success: Style::default().fg(Color::Green),
+                warning: Style::default().fg(Color::Yellow),
+                danger: Style::default().fg(Color::Red),
+                muted: Style::default().fg(Color::DarkGray),
+                header_cell: Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+                selection: Style::default()
+                    .bg(Color::Cyan)
+                    .fg(Color::Black)
+                    .add_modifier(Modifier::BOLD),
+                brand_logo: Style::default().fg(Color::Cyan),
+                brand_name: Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+                brand_tagline: Style::default().fg(Color::Blue),
+                badge_running: Style::default().fg(Color::Green),
+                badge_stopped: Style::default().fg(Color::Blue),
+                badge_error: Style::default().fg(Color::Red),
+                badge_unknown: Style::default().fg(Color::Blue),
+            }
+        }
+
+        // ── NoColor tier — SKIN-INDEPENDENT (P0 invariant) ───────────────────
+
+        /// NoColor invariant (P0): NO style carries any fg/bg color, for ANY skin.
         /// Differentiation is ONLY via Modifier (BOLD/DIM/REVERSED).
+        /// The skin argument is intentionally ignored in `resolve` when mode is NoColor.
         fn nocolor() -> Self {
             Theme {
                 mode: ColorMode::NoColor,

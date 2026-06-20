@@ -157,6 +157,10 @@ dst = "/home/me/.bashrc"
 
 Run `cbox` with no arguments on a TTY and you get a full terminal UI. List your boxes, inspect one, create via a wizard, apply provisioning with live progress, edit Boxfiles in your `$EDITOR`, and enter boxes—all with arrow keys and a few key presses.
 
+The TUI features a themed retro look: heavy box-drawing borders, a kraft-toned palette by default, a compact brand header above the box list, and state badges (`● up`, `○ sealed`, `✗ trouble`). It honors `NO_COLOR` and degrades to a 16-color tier on limited terminals; in no-color mode it renders bold/dim/glyph-only (zero ANSI color codes).
+
+Live-filter the box list with `/`—type to narrow; `Enter` keeps selection, `Esc` clears the filter. Press `?` for a context-aware keybinding cheatsheet. Cycle through three built-in skins with `t` (Kraft → Carbon → Blueprint; under `NO_COLOR` they collapse to the same bold/dim rendering). Press `l` to view the command-log: a scrollable record of every `distrobox`/`podman` command cbox ran this session (newest last); this is echo-only and does not undo anything. Transient notifications (toasts) appear after actions—success/info fade after a few seconds; errors linger.
+
 The TUI reuses the exact same `core::` logic as the CLI. **Zero duplication**, zero drift. Feature-gated by default; build lean with `--no-default-features` if you prefer CLI only.
 
 ```bash
@@ -164,7 +168,7 @@ cbox
 # → launches the terminal cockpit
 ```
 
-Key bindings: `↑↓` move, `c` create, `s` stop, `d` destroy, `a` apply, `e` edit, `enter` inspect/enter, `?` doctor, `q` quit.
+Key bindings: `↑↓` move, `/` filter, `c` create, `s` stop, `d` destroy, `a` apply, `e` edit, `enter` inspect/enter, `D` doctor, `t` theme, `l` command-log, `?` help (cheatsheet), `q` quit.
 
 ---
 
@@ -192,7 +196,7 @@ make dist
 ```bash
 make build         # debug build
 make release       # optimized build
-make test          # run all 129 tests (zero real distrobox needed)
+make test          # run all tests (over 350; zero real distrobox needed)
 make check         # full CI gate: fmt + lint + build + test
 make shell         # interactive shell inside the dev container
 make clean         # remove build artifacts
@@ -492,7 +496,13 @@ Prints the plan (which steps would SKIP or RUN, which fields differ) without exe
 <details>
 <summary><strong>TUI screens</strong></summary>
 
-- **List (home)**: table of boxes (NAME | STATUS | IMAGE | DOCKER | CBOX?). Arrow keys to move, `c` to create, `s` to stop, `d` to destroy, `a` to apply, `e` to edit, `enter` to inspect or enter (if running), `?` for doctor, `q` to quit.
+- **List (home)**: table of boxes (NAME | STATUS | IMAGE | DOCKER | CBOX?) with brand header and state badges. Arrow keys to move, `c` to create, `s` to stop, `d` to destroy, `a` to apply, `e` to edit, `enter` to inspect or enter (if running), `D` for doctor, `q` to quit.
+  - **Overlays & modes:**
+    - **Fuzzy filter** (`/`): type to narrow the box list live; `Enter` keeps selection, `Esc` clears.
+    - **Keybinding cheatsheet** (`?`): context-aware overlay showing valid keys for the current screen.
+    - **Command-log** (`l`): scrollable record of every `distrobox`/`podman` command run this session (newest last); echo-only, does not undo.
+    - **Color skin switcher** (`t`): cycle through Kraft (default), Carbon, Blueprint. Under `NO_COLOR`, all three render as bold/dim.
+    - **Toasts**: transient notifications after actions (success/info fade after seconds; errors linger).
 - **Detail (inspect)**: key/value panel for a selected box. `e` to edit its Boxfile, `a` to apply, `enter` to enter.
 - **Create wizard**: step through name, image, packages, docker-mode picker, confirm.
 - **Apply / up progress**: per-step list (idx | type | status | duration). SKIP (dim), RAN (green), COPIED (green), FAILED (red).
@@ -516,7 +526,7 @@ Prints the plan (which steps would SKIP or RUN, which fields differ) without exe
 - **Phase 3 (TUI):** `cbox` or `cbox tui` launches a TEA (Model–Message–update–view) cockpit. Reuses the exact `core::` functions.
 
 **Test coverage:**
-- **129 tests**, all mock-driven.
+- **Over 350 tests**, all mock-driven.
 - **Unit tests** (`tests/argv_builder.rs`): pure flag-mapping functions.
 - **Integration tests** (`tests/create.rs`, `tests/list.rs`, etc.): commands against `MockRunner`.
 - **CI gate** (`G-NO-NET`): full test suite passes with zero distrobox/podman/docker installed.
@@ -535,7 +545,7 @@ Prints the plan (which steps would SKIP or RUN, which fields differ) without exe
 
 **Sandbox is not a security boundary.** The `none` docker mode means **decoupled from the host container runtime**, not isolated. distrobox runs `--privileged --security-opt label=disable` by default. `cbox` adds optional `--unshare-*` hardening, but true isolation requires a separate VM.
 
-**Tests use mocks.** All 129 tests run without any real distrobox installed. Real-host validation happens via optional smoke tests (`#[ignore]`, manual run).
+**Tests use mocks.** All tests (over 350) run without any real distrobox installed. Real-host validation happens via optional smoke tests (`#[ignore]`, manual run).
 
 **Secrets via keyring.** Declare secrets in `[secrets]` (KEY names only; values live in the OS keyring, never the Boxfile). Use `cbox secret set <BOX> <KEY>` to store values. `persist = true` keeps them in the box's persistent env (visible to `podman inspect` from the host); `persist = false` injects them only during provision steps. The keyring must be available and unlocked; if it's not, `cbox up`/`apply` exits 75 and changes nothing.
 
