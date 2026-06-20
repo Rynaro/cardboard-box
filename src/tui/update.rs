@@ -16,6 +16,8 @@ use crate::error::CboxError;
 use crate::tui::action::{Action, BULK_ACTIONS};
 use crate::tui::bulk::{bulk_targets, is_running, BulkOp};
 use crate::tui::effect::Effect;
+use crate::tui::logstream::SCROLL_STEP;
+use crate::tui::message::Mouse;
 use crate::tui::message::{Key, Message};
 use crate::tui::model::{
     BulkConfirmState, ConfirmState, FilterState, Model, Overlay, ProgressState, Screen,
@@ -67,6 +69,9 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Effect> {
         // ── Key events ────────────────────────────────────────────────────────
         Message::Key(key) => handle_key(model, key),
 
+        // ── Mouse scroll ──────────────────────────────────────────────────────
+        Message::Mouse(mouse) => handle_mouse(model, mouse),
+
         // ── Effect completions ────────────────────────────────────────────────
         Message::ListLoaded(result) => handle_list_loaded(model, result),
         Message::DetailLoaded(result) => handle_detail_loaded(model, result),
@@ -81,6 +86,10 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Effect> {
         // ── Bundle 2: silent poll completions ─────────────────────────────────
         Message::SilentListLoaded(result) => handle_silent_list_loaded(model, result),
         Message::StatsLoaded(result) => handle_stats_loaded(model, result),
+
+        // ── Bundle 3: streaming log completions ────────────────────────────────
+        Message::LogChunk(chunk) => handle_log_chunk(model, chunk),
+        Message::LogStreamEnded(code) => handle_log_stream_ended(model, code),
     }
 }
 
@@ -132,6 +141,13 @@ fn handle_key(model: &mut Model, key: Key) -> Vec<Effect> {
             let bulk_only = *bulk_only;
             return handle_key_palette(model, key, cursor, matches, bulk_only);
         }
+        Overlay::History {
+            cursor, matches, ..
+        } => {
+            let cursor = *cursor;
+            let matches = matches.clone();
+            return handle_key_history(model, key, cursor, matches);
+        }
     }
 
     // 5. Global keys (available on every non-busy screen): skin cycle, cheatsheet, palette.
@@ -161,6 +177,7 @@ fn handle_key(model: &mut Model, key: Key) -> Vec<Effect> {
         Screen::ConfirmDestroy => handle_key_confirm(model, key),
         Screen::Progress => handle_key_progress(model, key),
         Screen::DoctorPanel => handle_key_doctor(model, key),
+        Screen::Logs => handle_key_logs(model, key),
     }
 }
 
@@ -327,6 +344,10 @@ fn handle_key_list(model: &mut Model, key: Key) -> Vec<Effect> {
             model.overlay = Overlay::CommandLog { scroll: 0 };
             vec![]
         }
+        // `L` opens the live log streaming screen for the selected box.
+        Key::Char('L') => open_logs_screen(model),
+        // `H` opens the cross-session action history overlay.
+        Key::Char('H') => open_history_overlay(model),
         // `b` opens the palette scoped to bulk actions only (fast-path for bulk ops).
         Key::Char('b') => {
             open_palette(model, true);
@@ -717,6 +738,308 @@ fn handle_key_doctor(model: &mut Model, key: Key) -> Vec<Effect> {
     }
 }
 
+// ─── Bundle 3: Logs screen ────────────────────────────────────────────────────
+
+fn handle_key_logs(model: &mut Model, key: Key) -> Vec<Effect> {
+    match key {
+        Key::Esc | Key::Char('q') => {
+            model.screen = Screen::List;
+            model.log_target = None;
+            vec![Effect::StopLogs]
+        }
+        // Autoscroll toggle.
+        Key::Char('a') => {
+            model.log_autoscroll = !model.log_autoscroll;
+            vec![]
+        }
+        // Wrap toggle.
+        Key::Char('w') => {
+            model.log_wrap = !model.log_wrap;
+            vec![]
+        }
+        Key::Up | Key::Char('k') => {
+            model.log_scroll = model.log_scroll.saturating_add(SCROLL_STEP);
+            // Manual scroll up disables autoscroll.
+            model.log_autoscroll = false;
+            vec![]
+        }
+        Key::Down | Key::Char('j') => {
+            if model.log_scroll >= SCROLL_STEP {
+                model.log_scroll -= SCROLL_STEP;
+            } else {
+                model.log_scroll = 0;
+            }
+            // Re-enable autoscroll when reaching the bottom.
+            if model.log_scroll == 0 {
+                model.log_autoscroll = true;
+            }
+            vec![]
+        }
+        Key::Left => {
+            // Page up (by a larger step).
+            model.log_scroll = model.log_scroll.saturating_add(SCROLL_STEP * 5);
+            model.log_autoscroll = false;
+            vec![]
+        }
+        Key::Right => {
+            // Page down.
+            if model.log_scroll >= SCROLL_STEP * 5 {
+                model.log_scroll -= SCROLL_STEP * 5;
+            } else {
+                model.log_scroll = 0;
+            }
+            if model.log_scroll == 0 {
+                model.log_autoscroll = true;
+            }
+            vec![]
+        }
+        _ => vec![],
+    }
+}
+
+/// Open the live log streaming screen for the selected box (AC-LOGSCREEN-1).
+/// If no box is selected → no-op (AC-LOGOPEN-1).
+fn open_logs_screen(model: &mut Model) -> Vec<Effect> {
+    let row = match model.selected_box().cloned() {
+        Some(r) => r,
+        None => return vec![],
+    };
+
+    let id = row.id.clone();
+    let backend = row.backend.clone();
+
+    // Determine the new target.
+    let new_target = (id.clone(), backend.clone());
+
+    // Swap detection: if already streaming a different target, emit StopLogs first.
+    let mut effects: Vec<Effect> = Vec::new();
+    if let Some(ref existing) = model.log_target {
+        if existing != &new_target {
+            effects.push(Effect::StopLogs);
+        } else {
+            // Same target already streaming — just transition to the screen.
+            model.screen = Screen::Logs;
+            return vec![];
+        }
+    }
+
+    model.screen = Screen::Logs;
+    model.log_target = Some(new_target);
+    model.log_buffer.clear();
+    model.log_scroll = 0;
+    model.log_autoscroll = true;
+    model.log_ended = false;
+
+    effects.push(Effect::StreamLogs { id, backend });
+    effects
+}
+
+// ─── Bundle 3: History overlay ────────────────────────────────────────────────
+
+fn open_history_overlay(model: &mut Model) -> Vec<Effect> {
+    let store = crate::tui::history::HistoryStore::new();
+    let entries = store.load();
+    let n = entries.len();
+    model.overlay = Overlay::History {
+        query: String::new(),
+        matches: (0..n).collect(),
+        cursor: 0,
+        entries,
+    };
+    vec![]
+}
+
+fn handle_key_history(
+    model: &mut Model,
+    key: Key,
+    cursor: usize,
+    matches: Vec<usize>,
+) -> Vec<Effect> {
+    match key {
+        Key::Esc | Key::Char('q') => {
+            model.overlay = Overlay::None;
+            vec![]
+        }
+        Key::Up | Key::Char('k') => {
+            let new_cursor = cursor.saturating_sub(1);
+            if let Overlay::History {
+                cursor: ref mut c, ..
+            } = model.overlay
+            {
+                *c = new_cursor;
+            }
+            vec![]
+        }
+        Key::Down | Key::Char('j') => {
+            let max = matches.len().saturating_sub(1);
+            let new_cursor = (cursor + 1).min(max);
+            if let Overlay::History {
+                cursor: ref mut c, ..
+            } = model.overlay
+            {
+                *c = new_cursor;
+            }
+            vec![]
+        }
+        Key::Backspace => {
+            if let Overlay::History {
+                ref mut query,
+                ref mut matches,
+                ref mut cursor,
+                ref entries,
+            } = model.overlay
+            {
+                query.pop();
+                let q = query.clone();
+                let argvs: Vec<&str> = entries.iter().map(|e| e.argv.as_str()).collect();
+                *matches = history_rank(&q, &argvs);
+                *cursor = 0;
+            }
+            vec![]
+        }
+        Key::Enter => {
+            // Read-only review — Enter is a no-op (spec: no re-run, out of scope).
+            vec![]
+        }
+        Key::Char(c) => {
+            if let Overlay::History {
+                ref mut query,
+                ref mut matches,
+                ref mut cursor,
+                ref entries,
+            } = model.overlay
+            {
+                query.push(c);
+                let q = query.clone();
+                let argvs: Vec<&str> = entries.iter().map(|e| e.argv.as_str()).collect();
+                *matches = history_rank(&q, &argvs);
+                *cursor = 0;
+            }
+            vec![]
+        }
+        _ => vec![],
+    }
+}
+
+fn history_rank(query: &str, argvs: &[&str]) -> Vec<usize> {
+    #[cfg(feature = "tui")]
+    {
+        fuzzy_rank(query, argvs)
+    }
+    #[cfg(not(feature = "tui"))]
+    {
+        if query.trim().is_empty() {
+            return (0..argvs.len()).collect();
+        }
+        argvs
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.to_lowercase().contains(&query.to_lowercase()))
+            .map(|(i, _)| i)
+            .collect()
+    }
+}
+
+// ─── Bundle 3: mouse scroll handler ──────────────────────────────────────────
+
+/// Return the scroll delta for a mouse event: +1 = scroll down, -1 = scroll up, 0 = ignore.
+pub fn scroll_delta(mouse: &Mouse) -> i32 {
+    match mouse {
+        Mouse::ScrollDown => 1,
+        Mouse::ScrollUp => -1,
+        Mouse::Other => 0,
+    }
+}
+
+fn handle_mouse(model: &mut Model, mouse: Mouse) -> Vec<Effect> {
+    let delta = scroll_delta(&mouse);
+    if delta == 0 {
+        return vec![];
+    }
+
+    // Route by current overlay / screen.
+    match model.overlay.clone() {
+        Overlay::CommandLog { scroll } => {
+            // Scroll the command-log overlay.
+            let new_scroll = if delta > 0 {
+                // ScrollDown → advance (newer entries).
+                let entry_count = model.cmdlog.lock().map(|log| log.len()).unwrap_or(0);
+                let max_scroll = entry_count.saturating_sub(1);
+                (scroll + SCROLL_STEP).min(max_scroll)
+            } else {
+                scroll.saturating_sub(SCROLL_STEP)
+            };
+            model.overlay = Overlay::CommandLog { scroll: new_scroll };
+            return vec![];
+        }
+        Overlay::History {
+            cursor, matches, ..
+        } => {
+            let new_cursor = if delta > 0 {
+                let max = matches.len().saturating_sub(1);
+                (cursor + 1).min(max)
+            } else {
+                cursor.saturating_sub(1)
+            };
+            if let Overlay::History {
+                cursor: ref mut c, ..
+            } = model.overlay
+            {
+                *c = new_cursor;
+            }
+            return vec![];
+        }
+        _ => {}
+    }
+
+    match model.screen {
+        Screen::List | Screen::Detail => {
+            if delta > 0 {
+                model.move_down();
+            } else {
+                model.move_up();
+            }
+        }
+        Screen::Logs => {
+            // delta > 0 = scroll down (towards newer) = decrease scroll offset.
+            // delta < 0 = scroll up (towards older) = increase scroll offset.
+            if delta < 0 {
+                // Scroll up → older lines.
+                model.log_scroll = model.log_scroll.saturating_add(SCROLL_STEP);
+                model.log_autoscroll = false;
+            } else {
+                // Scroll down → newer lines.
+                if model.log_scroll >= SCROLL_STEP {
+                    model.log_scroll -= SCROLL_STEP;
+                } else {
+                    model.log_scroll = 0;
+                }
+                // Re-enable autoscroll when we reach the bottom (offset = 0).
+                if model.log_scroll == 0 {
+                    model.log_autoscroll = true;
+                }
+            }
+        }
+        _ => {}
+    }
+    vec![]
+}
+
+// ─── Bundle 3: log message handlers ──────────────────────────────────────────
+
+fn handle_log_chunk(model: &mut Model, chunk: Vec<String>) -> Vec<Effect> {
+    model.log_buffer.push_chunk(chunk);
+    if model.log_autoscroll {
+        model.log_scroll = 0; // snap to bottom (0 = bottom-most position)
+    }
+    vec![]
+}
+
+fn handle_log_stream_ended(model: &mut Model, _code: Option<i32>) -> Vec<Effect> {
+    model.log_ended = true;
+    vec![]
+}
+
 // ─── Bundle 2: dispatch_action (single reducer dispatch) ─────────────────────
 
 /// Map an `Action` to its effects and model mutations.
@@ -781,6 +1104,9 @@ pub fn dispatch_action(model: &mut Model, action: Action) -> Vec<Effect> {
         Action::BulkStopRunning => open_bulk_confirm(model, BulkOp::StopRunning),
         Action::BulkDestroyManaged => open_bulk_confirm(model, BulkOp::DestroyManaged),
         Action::BulkDestroyUnmanaged => open_bulk_confirm(model, BulkOp::DestroyUnmanaged),
+        // Bundle 3.
+        Action::History => open_history_overlay(model),
+        Action::ViewLogs => open_logs_screen(model),
     }
 }
 

@@ -1,0 +1,309 @@
+spec_id: 2026-06-20-tui-bundle3-glass-cockpit
+title: cbox TUI Bundle 3 "Glass Cockpit" (FOCUSED)
+intent: REQUEST_CHANGE
+methodology: SPECTRA
+methodology_version: 4.9.1
+release_target: 0.11.0
+release_bump: minor   # feat -> release-please minor
+complexity: 10/12
+confidence: 0.905
+decision: AUTO_PROCEED
+author_agent: spectra
+handoff_to: vivi
+created_at: 2026-06-20
+builds: containerized   # Vivi uses make targets, never host cargo
+
+stack:
+  language: rust
+  ui: ratatui-0.28
+  terminal: crossterm-0.28
+  architecture: the-elm-architecture
+  concurrency: single-background-worker-thread + NEW dedicated stream thread
+
+locked_feature_set:
+  - id: F1
+    name: scroll-wheel-mouse
+    note: scroll-only, NO click-to-select
+  - id: F2
+    name: cross-session-action-history
+    note: persisted under $XDG_STATE_HOME/cbox, redacted before disk
+  - id: F3
+    name: live-container-log-streaming-modal
+    note: full-screen MODAL (Screen::Logs), `<backend> logs -f <id>`
+
+deferred_out_of_scope:
+  - persistent-multi-pane-dashboard-and-focus-model
+  - click-to-select-mouse
+  - streaming-apply-provisioning-output
+  - rerun-history-entry
+
+gap_resolutions_honored:
+  GAP-1: coalesce + bounded ring; try_send drop-on-full; result channel sync_channel(32)
+  GAP-2: dedicated shell thread (NOT worker); Child + AtomicBool stop-flag + JoinHandle; set-flag->kill->join
+  GAP-5: container logs only via build_logs_argv + core::logs (engine call, NOT distrobox subcommand)
+  GAP-6: cross-session redacted history.jsonl under $XDG_STATE_HOME/cbox; capture = each real spawn via LoggingRunner
+
+key_decisions:
+  D-LOGSCREEN: Screen::Logs (new) over Overlay::Logs — modal/full-screen/stateful; NOT a pane/focus model
+  D-ACTION-DEF: history action = each real spawn via LoggingRunner write-hook (cmdlog.rs:108-131), NOT dispatch_action
+  D-HANDLES: Child/stop-flag/JoinHandle live SHELL-LOCAL in app.rs (beside Worker, app.rs:113); Model stays pure
+
+new_files:
+  - src/tui/logstream.rs   # LogCoalescer (pure, lean) + constants
+  - src/tui/history.rs      # HistoryEntry, HistoryStore, redact_argv (lean, serde_json)
+  - tests/tui_bundle3.rs    # all Bundle 3 ACs (pure helpers)
+
+architecture_anchors:
+  worker_spawn: app.rs:124-131
+  effect_channel: app.rs:122   # sync_channel::<Effect>(4)
+  result_channel: app.rs:237   # sync_channel::<Message>(32)
+  try_send_drop: app.rs:316
+  try_recv_drain: app.rs:264
+  event_loop_match: app.rs:270-273
+  terminal_guard: app.rs:49-67
+  restore_once: app.rs:69-77
+  panic_hook: app.rs:81-88
+  terminal_restored_atomic: app.rs:47
+  shell_handled_effects: app.rs:291-308
+  runner_runmode: runner.rs:7-15
+  runner_trait: runner.rs:96-121
+  run_with_timeout_default: runner.rs:113-120
+  real_run_with_timeout: real.rs:57-124
+  kill_reap_idiom: real.rs:93-97
+  build_stats_argv: argv.rs:194-205
+  secret_env_nameonly: argv.rs:91-96
+  plaintext_env_inline: argv.rs:98-102
+  core_stats: core/mod.rs:197-212
+  core_stats_backend_program: core/mod.rs:204
+  cmdlog_ring: cmdlog.rs:34-75
+  cmdlog_push_dropoldest: cmdlog.rs:51-59
+  logging_runner_hook: cmdlog.rs:108-131
+  logging_runner_dryrun_skip: cmdlog.rs:111
+  statshistory_pushsample: model.rs:236-250
+  overlay_palette: model.rs:179-189
+  screen_enum: model.rs:19-27
+  model_struct: model.rs:286-335
+  fuzzy_rank: filter.rs:26-49
+  key_dispatch_funnel: update.rs:89-165
+  overlay_precheck: update.rs:113-135
+  handle_key_palette: update.rs:124-134
+  handle_key_doctor: update.rs:710-718
+  dispatch_action: update.rs:726-785
+  xdg_fallback_pattern: update.rs:1299-1303
+  should_poll: poll.rs:71-92
+  action_enum: action.rs:17-48
+  palette_actions: action.rs:147-173
+  voice_banned_list: tui_theme.rs:351-358
+  voice_copy_consts: tui_theme.rs:362-398
+  secret_set_value_from_tty: cli/secret.rs:86,124-147
+
+constants:
+  FLUSH_LINES: 64          # coalescer size trigger (tune)
+  FLUSH_INTERVAL_MS: 50    # coalescer time trigger (GAP-1 ~50ms)
+  LOG_RING_CAP: 2000       # Model LogBuffer cap
+  HISTORY_CAP: 1000        # disk retention cap
+  HISTORY_FILE: history.jsonl
+  SCROLL_STEP: 3           # log/cmdlog scroll lines per wheel notch
+  history_key: H           # recommended (l/L taken: l=command-log, L=logs)
+  logs_key: L              # recommended
+
+redaction_rule:
+  function: redact_argv(argv: &str) -> String
+  tokenize: split on space (argv space-joined, cmdlog.rs:110)
+  scrub_kv_patterns: [token, secret, password, passwd, apikey, api_key, api-key]   # case-insensitive; KEY=VALUE -> KEY=<redacted>
+  scrub_plain_env: "--env KEY=VALUE -> --env KEY=<redacted>"   # argv.rs:98-102
+  keep_nameonly_env: "--env KEY (persist=true, value-less) unchanged"   # argv.rs:91-96
+  passthrough: [subcommands, box-names, image-refs, --label cbox.*, flags]
+  note: secret set value never reaches argv (read from TTY/stdin, cli/secret.rs:124-147); scrubber is defense-in-depth
+  applies_to: [disk write, History overlay display]
+
+stories:
+  - id: S1
+    feature: F1
+    title: Mouse capture + Event::Mouse arm + scroll routing
+    timebox: <=2d
+    risk: P1
+    kupo_eligible: false
+    files: [src/tui/app.rs, src/tui/message.rs, src/tui/update.rs]
+    action_plan:
+      - Add EnableMouseCapture in TerminalGuard::new (app.rs:52-60)
+      - Add DisableMouseCapture in restore_terminal_once (app.rs:69-77) -> panic path covered (app.rs:85)
+      - Patch suspend_and_edit/suspend_and_enter (app.rs:144-198,203-224) disable on leave / enable on return
+      - Add Mouse enum + Message::Mouse (message.rs); normalize_mouse (app.rs); Event::Mouse arm (app.rs:270-273)
+      - Pure scroll_delta + reducer routing (List/Detail/Logs/CommandLog/History)
+    acceptance: [AC-MOUSE-1, AC-MOUSE-2, AC-MOUSE-3]
+    verifier: [make build, make lint, make lint-lean, make test]
+    agent_hint: builder
+  - id: S2
+    feature: F2
+    title: Host HistoryStore (XDG, JSONL, cap, redaction, graceful load)
+    timebox: <=2d
+    risk: P0
+    files: [src/tui/history.rs]
+    action_plan:
+      - HistoryEntry {argv, status, ts} serde
+      - XDG_STATE_HOME path resolution (mirror update.rs:1299-1303, default ~/.local/state)
+      - redact_argv (see redaction_rule)
+      - append (best-effort), load (bounded + corrupt-tolerant), compaction to HISTORY_CAP
+    acceptance: [AC-HIST-REDACT-1, AC-HIST-REDACT-2, AC-HIST-ROUNDTRIP-1, AC-HIST-CAP-1, AC-HIST-CORRUPT-1, AC-HIST-PATH-1]
+    verifier: [make build, make lint-lean, make test]
+    agent_hint: builder
+  - id: S3
+    feature: F2
+    title: LoggingRunner write-hook -> history append (redacted)
+    timebox: 1d
+    risk: P1
+    kupo_eligible: true
+    files: [src/tui/cmdlog.rs, src/tui/app.rs]
+    action_plan:
+      - Add Arc<Mutex<HistoryStore>> to LoggingRunner (cmdlog.rs:97-131)
+      - After log.push in run/run_interactive -> history.append(redact_argv(argv), status); DryRun already skipped (cmdlog.rs:111)
+      - Construct + inject in app::run (app.rs:333-338)
+    acceptance: [AC-HIST-CAPTURE-1]
+    verifier: [make build, make lint-lean, make test]
+    agent_hint: kupo
+  - id: S4
+    feature: F2
+    title: Overlay::History search UX (fuzzy) + Action::History wiring
+    timebox: <=2d
+    risk: P2
+    files: [src/tui/model.rs, src/tui/update.rs, src/tui/action.rs, src/tui/keymap.rs, src/tui/view.rs, src/tui/strings.rs]
+    action_plan:
+      - Overlay::History {query, matches, cursor, entries} (model.rs:171-190)
+      - handle_key_history (mirror handle_key_palette update.rs:124-134) + overlay pre-check arm (update.rs:113-135)
+      - Action::History (action.rs:17-48) + label/default_key/ALL_ACTIONS/palette source + dispatch_action arm (update.rs:726)
+      - load via HistoryStore::load() on open; fuzzy_rank (filter.rs:26-49); Enter = no-op (read-only)
+      - strings: HISTORY_TITLE/EMPTY/HINT
+    acceptance: [AC-HIST-FUZZY-1, AC-HIST-OPEN-1]
+    verifier: [make build, make test]
+    agent_hint: builder
+    depends: [S2]
+  - id: S5
+    feature: F3
+    title: RunMode::Stream + run_stream + build_logs_argv + core::logs
+    timebox: <=2d
+    risk: P0
+    files: [src/dbox/runner.rs, src/dbox/real.rs, src/dbox/argv.rs, src/core/mod.rs]
+    action_plan:
+      - Add RunMode::Stream (runner.rs:7-15)
+      - Add run_stream(inv, on_line:&mut dyn FnMut(String), stop:&AtomicBool)->Result<i32,RunnerError> trait method with default "unsupported" impl (mirror run_with_timeout default runner.rs:113-120)
+      - RealRunner::run_stream (real.rs beside 57-124): BufReader line loop, stderr=null, stop-check between reads, kill+reap (real.rs:93-97), EOF->reap+exit-code
+      - build_logs_argv(id)=["logs","-f",id] (argv.rs:194-205)
+      - core::logs (mod.rs:191-212) program = spec.backend.as_str() (mod.rs:204) + RunMode::Stream
+    acceptance: [AC-LOGARGV-1, AC-STREAM-STOP-1, AC-STREAM-EOF-1]
+    verifier: [make build, make lint-lean, make test]
+    agent_hint: reasoner
+  - id: S6
+    feature: F3
+    title: LogCoalescer + LogBuffer ring + Message::LogChunk/LogStreamEnded
+    timebox: <=2d
+    risk: P0
+    files: [src/tui/logstream.rs, src/tui/model.rs, src/tui/message.rs, src/tui/update.rs]
+    action_plan:
+      - LogCoalescer (logstream.rs): push/due/drain; FLUSH_LINES + FLUSH_INTERVAL_MS; deterministic (inject elapsed for tests)
+      - LogBuffer on Model (VecDeque-cap, push_chunk, LOG_RING_CAP) mirror StatsHistory.push_sample (model.rs:236-250)
+      - Message::LogChunk(Vec<String>) + Message::LogStreamEnded(Option<i32>) (message.rs:51-76)
+      - update handlers: push_chunk + autoscroll snap; ended -> mark log_ended
+    acceptance: [AC-COALESCE-1, AC-COALESCE-2, AC-LOGRING-1]
+    verifier: [make build, make lint-lean, make test]
+    agent_hint: builder
+    depends: [S5]
+  - id: S7
+    feature: F3
+    title: Shell dedicated thread + Child/stop-flag/JoinHandle + cancel triggers
+    timebox: <=3d
+    risk: P0
+    files: [src/tui/app.rs, src/tui/effect.rs, src/tui/update.rs]
+    action_plan:
+      - LogStream {stop:Arc<AtomicBool>, join:JoinHandle, target:(id,backend)} + Option<LogStream> in run_loop (app.rs:228-313, beside Worker app.rs:113)
+      - Effect::StreamLogs{id,backend} + Effect::StopLogs (effect.rs:44-81); SHELL-handled in loop match (app.rs:286-308); execute_effect returns None for them
+      - StreamLogs: if different target -> teardown old first; spawn DEDICATED thread driving runner.run_stream with cloned result_tx + LogCoalescer; final drain + LogStreamEnded
+      - stop_log_stream helper: set flag (SeqCst) -> join (child killed -> read_line EOF unblocks)
+      - cancel triggers: pane-close StopLogs, target-swap, Quit arm, AND unconditional post-loop teardown (no leak)
+    acceptance: [AC-STREAM-SWAP-1, AC-STREAM-QUIT-1, AC-NOWEDGE-1]
+    verifier: [make build, make lint, make lint-lean, make test]
+    agent_hint: reasoner
+    depends: [S5, S6]
+  - id: S8
+    feature: F3
+    title: Screen::Logs modal + handle_key_logs + view (toggles/scroll) + strings
+    timebox: <=2d
+    risk: P1
+    files: [src/tui/model.rs, src/tui/update.rs, src/tui/view.rs, src/tui/strings.rs, src/tui/action.rs, src/tui/keymap.rs]
+    action_plan:
+      - Screen::Logs (model.rs:19-27) + log-pane Model state (log_buffer, log_scroll, log_autoscroll, log_wrap, log_target, log_ended)
+      - Open key (logs_key=L) on List -> Screen::Logs + Effect::StreamLogs for selected box; no-op if no selection
+      - handle_key_logs (mirror handle_key_doctor update.rs:710-718): Esc/q -> List + StopLogs; toggles (a/w); Up/Down/PgUp/PgDn scroll
+      - view: render ring (wrap on/off), header toggles, LOGS_EMPTY/ENDED lines
+      - strings: LOGS_TITLE/EMPTY/ENDED/HINT
+    acceptance: [AC-LOGSCREEN-1, AC-LOGTOGGLE-1, AC-LOGOPEN-1]
+    verifier: [make build, make test]
+    agent_hint: builder
+    depends: [S6, S7]
+  - id: K1
+    title: Voice-rule extension (AC-COPY-1) over new copy + Action::History label
+    timebox: 1d
+    risk: P1
+    kupo_eligible: true
+    files: [tests/tui_theme.rs, src/tui/strings.rs]
+    action_plan:
+      - Extend AC-COPY-1 const list (tui_theme.rs:362-398) with LOGS_*, HISTORY_*
+      - Extend AC-VOICE-1 to Action::History.label()
+      - Add voice-compliant consts to strings.rs
+    acceptance: [AC-COPY-1, AC-VOICE-1]
+    verifier: [make test]
+    agent_hint: kupo
+    depends: [S4, S8]
+  - id: FINAL
+    title: Full release gate
+    verifier: [make check]
+    depends: [S1, S2, S3, S4, S5, S6, S7, S8, K1]
+
+execution_order: [S1, S2, S3, S4, S5, S6, S7, S8, K1, FINAL]
+critical_path: [S5, S6, S7, S8]
+parallelizable:
+  - [S1, S2]            # independent
+  - [S5, S2]            # streaming chain independent of history chain
+
+validation_gates:
+  - id: G-BUILD
+    command: make build
+  - id: G-BUILD-LEAN
+    command: make lint-lean
+    asserts: no-tui build compiles; new pure modules feature-clean
+  - id: G-LINT
+    command: make lint
+  - id: G-TEST
+    command: make test
+    asserts: tests/tui_bundle3.rs green; tui_update/effects/theme/bundle1/bundle2/keymap/smoke + CLI suites green
+  - id: G-FINAL
+    command: make check
+  - id: G-LOGLEAK
+    asserts: stop flag -> kill -> join; no orphan thread/child after quit (P0)
+  - id: G-NOWEDGE
+    asserts: UI responsive under log flood; coalesce/ring degrade gracefully (P0)
+  - id: G-REDACT
+    asserts: secret-bearing argv scrubbed before write (P0)
+  - id: G-HISTSAFE
+    asserts: corrupt/missing history -> empty, no panic (P1)
+  - id: G-MOUSE-RESTORE
+    asserts: DisableMouseCapture in restore path covers panic (P1)
+  - id: G-COMPAT
+    asserts: existing Mocks unchanged via default run_stream (P1)
+
+risk_register:
+  - {id: R1, risk: thread/child leak, severity: P0, mitigation: single spawn + single teardown on close/swap/quit/post-loop, set-flag-then-join, kill+reap, gate: G-LOGLEAK}
+  - {id: R2, risk: wedged UI, severity: P0, mitigation: dedicated thread (GAP-2) + coalesce/try_send/bounded ring (GAP-1), gate: G-NOWEDGE}
+  - {id: R3, risk: secrets on disk, severity: P0, mitigation: redact_argv deny-pattern scrubber, gate: G-REDACT}
+  - {id: R4, risk: mouse capture after panic, severity: P1, mitigation: DisableMouseCapture in restore_terminal_once (panic hook calls it), gate: G-MOUSE-RESTORE}
+  - {id: R5, risk: corrupt/missing history crash, severity: P1, mitigation: load skips bad lines / missing->empty, gate: G-HISTSAFE}
+  - {id: R6, risk: mock breakage from new RunMode/method, severity: P1, mitigation: default run_stream impl + additive RunMode::Stream, gate: G-COMPAT}
+  - {id: R7, risk: channel contention drops chunks, severity: P2, mitigation: coalescing keeps rate low; try_send never blocks, gate: G-NOWEDGE}
+  - {id: R8, risk: scope creep toward dashboard/focus, severity: P1, mitigation: Screen::Logs is single full-screen (no pane/Rects); scroll-only mouse, gate: review}
+
+confidence_factors:
+  pattern_match: 0.92
+  requirement_clarity: 0.95
+  decomposition_stability: 0.85
+  constraint_compliance: 0.90
+  weighted: 0.905

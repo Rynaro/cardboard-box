@@ -107,3 +107,23 @@ pub const PALETTE_TITLE: &str = " : command palette ";
 pub const PALETTE_NO_MATCH: &str = "No matching actions.";
 /// Footer shown in the palette overlay.
 pub const PALETTE_HINT: &str = "↑↓ move · enter run · esc cancel";
+
+// ─── Bundle 3: Log streaming pane copy ───────────────────────────────────────
+
+/// Title for the live log streaming screen.
+pub const LOGS_TITLE: &str = " container logs ";
+/// Shown when the log ring is empty (no lines received yet).
+pub const LOGS_EMPTY: &str = "No log output received yet.";
+/// Shown when the log stream has ended (container stopped or exited).
+pub const LOGS_ENDED: &str = "Stream ended.";
+/// Footer hint shown in the log screen.
+pub const LOGS_HINT: &str = "↑↓ scroll · a autoscroll · w wrap · esc/q back";
+
+// ─── Bundle 3: History overlay copy ──────────────────────────────────────────
+
+/// Title for the action history overlay.
+pub const HISTORY_TITLE: &str = " action history ";
+/// Shown when the history is empty (no prior actions recorded).
+pub const HISTORY_EMPTY: &str = "No history recorded yet.";
+/// Footer hint shown in the history overlay.
+pub const HISTORY_HINT: &str = "↑↓ move · type to filter · esc close";

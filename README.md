@@ -163,6 +163,8 @@ Live-filter the box list with `/`—type to narrow; `Enter` keeps selection, `Es
 
 The box list stays live: it auto-refreshes every couple of seconds, so a box flips stopped↔running on its own without pressing `r`, and a slow backend can't freeze the UI (polls time out instead of hanging). Press `:` for a fuzzy-searchable command palette of actions, and `b` for bulk operations over the list—prune all stopped boxes, stop all running, or destroy all cbox-managed (or all non-cbox) boxes; each shows the affected boxes and confirms first, and the non-cbox destroy requires typing `DESTROY UNMANAGED`. A running box's Detail screen draws live CPU and memory sparklines.
 
+Press `L` on a running box for a full-screen live log pane that tails its container output in real time (with autoscroll and wrap toggles); it streams on a background thread and tears itself down cleanly when you close it. Press `H` for a searchable action history that persists across sessions—secret-bearing arguments are redacted before anything is written to disk. The mouse wheel scrolls lists and panes.
+
 The TUI reuses the exact same `core::` logic as the CLI. **Zero duplication**, zero drift. Feature-gated by default; build lean with `--no-default-features` if you prefer CLI only.
 
 ```bash
@@ -170,7 +172,7 @@ cbox
 # → launches the terminal cockpit
 ```
 
-Key bindings: `↑↓` move, `/` filter, `:` palette, `c` create, `s` stop, `d` destroy, `b` bulk, `a` apply, `e` edit, `enter` inspect/enter, `D` doctor, `t` theme, `l` command-log, `?` help (cheatsheet), `q` quit.
+Key bindings: `↑↓` move, `/` filter, `:` palette, `c` create, `s` stop, `d` destroy, `b` bulk, `a` apply, `e` edit, `enter` inspect/enter, `D` doctor, `t` theme, `l` command-log, `L` live logs, `H` history, `?` help (cheatsheet), `q` quit. The mouse wheel scrolls lists and panes.
 
 ---
 
@@ -507,7 +509,10 @@ Prints the plan (which steps would SKIP or RUN, which fields differ) without exe
     - **Color skin switcher** (`t`): cycle through Kraft (default), Carbon, Blueprint. Under `NO_COLOR`, all three render as bold/dim.
     - **Toasts**: transient notifications after actions (success/info fade after seconds; errors linger).
     - **Bulk operations** (`b`): act over the whole list—prune all stopped, stop all running, destroy all cbox-managed, or destroy all non-cbox boxes; each confirms first, and the non-cbox destroy requires typing `DESTROY UNMANAGED`.
+    - **Action history** (`H`): fuzzy-searchable history of past actions, persisted across sessions (secret-bearing args redacted before disk).
+    - **Mouse**: the scroll wheel scrolls lists and panes.
 - **Detail (inspect)**: key/value panel for a selected box, plus live CPU/memory sparklines when the box is running (stopped boxes simply show none). `e` to edit its Boxfile, `a` to apply, `enter` to enter.
+- **Logs (live)**: full-screen pane (`L`) tailing a running box's container logs in real time, with autoscroll and wrap toggles; it streams on a background thread and tears down cleanly when closed. `Esc`/`q` to exit.
 - **Create wizard**: step through name, image, packages, docker-mode picker, confirm.
 - **Apply / up progress**: per-step list (idx | type | status | duration). SKIP (dim), RAN (green), COPIED (green), FAILED (red).
 - **Doctor panel**: distrobox version + backend health. Auto-pops if backend is unreachable.

@@ -1,5 +1,7 @@
 use super::runner::{CmdOutput, DistroboxRunner, Invocation, RunMode, RunnerError};
+use std::io::BufRead;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// Poll grain for the `try_wait` watchdog loop (~25ms → kill latency ≤ one grain past deadline).
@@ -121,6 +123,70 @@ impl DistroboxRunner for RealRunner {
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             argv,
         })
+    }
+
+    fn run_stream(
+        &self,
+        inv: Invocation,
+        on_line: &mut dyn FnMut(String),
+        stop: &AtomicBool,
+    ) -> Result<i32, RunnerError> {
+        let mut child = Command::new(&inv.program)
+            .args(&inv.args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    RunnerError::BinaryNotFound {
+                        program: inv.program.clone(),
+                    }
+                } else {
+                    RunnerError::Io {
+                        program: inv.program.clone(),
+                        source: e,
+                    }
+                }
+            })?;
+
+        let stdout = child.stdout.take().expect("stdout piped");
+        let mut reader = std::io::BufReader::new(stdout);
+        let mut line = String::new();
+
+        loop {
+            // Check cancel flag before each read.
+            if stop.load(Ordering::Acquire) {
+                let _ = child.kill();
+                let _ = child.wait(); // reap to avoid zombie
+                return Ok(-1);
+            }
+
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => {
+                    // EOF — container stopped; reap and return exit code.
+                    let status = child.wait().map_err(|e| RunnerError::Io {
+                        program: inv.program.clone(),
+                        source: e,
+                    })?;
+                    return Ok(status.code().unwrap_or(-1));
+                }
+                Ok(_) => {
+                    // Trim trailing newline before delivering.
+                    let trimmed = line.trim_end_matches(['\n', '\r']).to_string();
+                    on_line(trimmed);
+                }
+                Err(e) => {
+                    // IO error on read — reap and return error.
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(RunnerError::Io {
+                        program: inv.program.clone(),
+                        source: e,
+                    });
+                }
+            }
+        }
     }
 
     fn run_interactive(&self, inv: Invocation) -> Result<i32, RunnerError> {

@@ -12,6 +12,7 @@ use cbox::dbox::backend::Backend;
 use cbox::tui::cmdlog::{CmdLog, LoggingRunner};
 use cbox::tui::effect::Effect;
 use cbox::tui::filter::fuzzy_rank;
+use cbox::tui::history::HistoryStore;
 use cbox::tui::message::{Key, Message};
 use cbox::tui::model::{
     FilterState, Model, Overlay, StatusLine, ToastKind, TOAST_MAX, TOAST_TTL_ERROR,
@@ -524,7 +525,10 @@ fn ac_cmdlog_2_decorator_captures_argv_and_status() {
 
     let inner = Arc::new(MockRunner::new());
     let log = Arc::new(Mutex::new(CmdLog::new(200)));
-    let runner = LoggingRunner::new(inner, Arc::clone(&log));
+    let history = Arc::new(Mutex::new(HistoryStore::with_path(
+        std::path::PathBuf::from("/dev/null"),
+    )));
+    let runner = LoggingRunner::new(inner, Arc::clone(&log), history);
 
     let inv = Invocation::new(
         "distrobox",
@@ -561,7 +565,10 @@ fn ac_cmdlog_3_dry_run_not_logged() {
 
     let inner = Arc::new(MockRunner::new());
     let log = Arc::new(Mutex::new(CmdLog::new(200)));
-    let runner = LoggingRunner::new(inner, Arc::clone(&log));
+    let history = Arc::new(Mutex::new(HistoryStore::with_path(
+        std::path::PathBuf::from("/dev/null"),
+    )));
+    let runner = LoggingRunner::new(inner, Arc::clone(&log), history);
 
     let inv = Invocation::new("distrobox", vec!["create".to_string()], RunMode::DryRun);
     let _ = runner.run(inv);
@@ -579,7 +586,10 @@ fn ac_cmdlog_4_interactive_logs_exit_code() {
 
     let inner = Arc::new(MockRunner::new());
     let log = Arc::new(Mutex::new(CmdLog::new(200)));
-    let runner = LoggingRunner::new(inner, Arc::clone(&log));
+    let history = Arc::new(Mutex::new(HistoryStore::with_path(
+        std::path::PathBuf::from("/dev/null"),
+    )));
+    let runner = LoggingRunner::new(inner, Arc::clone(&log), history);
 
     let inv = Invocation::new(
         "distrobox",

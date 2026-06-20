@@ -62,6 +62,7 @@ mod inner {
                 }
                 Screen::Progress => render_progress(model, frame, chunks[0], &theme),
                 Screen::DoctorPanel => render_doctor(model, frame, chunks[0], &theme),
+                Screen::Logs => render_logs(model, frame, chunks[0], &theme),
             }
 
             render_status_bar(model, frame, chunks[1], &theme);
@@ -89,6 +90,14 @@ mod inner {
                 bulk_only,
             } => {
                 render_palette(frame, area, query, matches, *cursor, *bulk_only, &theme);
+            }
+            Overlay::History {
+                query,
+                matches,
+                cursor,
+                entries,
+            } => {
+                render_history(frame, area, query, matches, *cursor, entries, &theme);
             }
         }
 
@@ -841,6 +850,7 @@ mod inner {
             Screen::ConfirmDestroy => KeyContext::ConfirmDestroy,
             Screen::Progress => KeyContext::Progress,
             Screen::DoctorPanel => KeyContext::DoctorPanel,
+            Screen::Logs => KeyContext::Logs,
         };
         let bindings = keymap_for(ctx);
 
@@ -1236,6 +1246,183 @@ mod inner {
 
         let p = Paragraph::new(Span::styled(status_text, style));
         frame.render_widget(p, area);
+    }
+
+    // ─── Bundle 3: Logs screen ────────────────────────────────────────────────
+
+    fn render_logs(model: &Model, frame: &mut Frame, area: ratatui::layout::Rect, theme: &Theme) {
+        use crate::tui::strings;
+
+        // Header: title + toggle state.
+        let autoscroll_state = if model.log_autoscroll {
+            "auto"
+        } else {
+            "manual"
+        };
+        let wrap_state = if model.log_wrap { "wrap" } else { "clip" };
+        let target_label = model
+            .log_target
+            .as_ref()
+            .map(|(id, _)| id.as_str())
+            .unwrap_or("none");
+        let title = format!(
+            "{} [{}] [{scroll}] [{autoscroll_state}] [{wrap_state}]",
+            strings::LOGS_TITLE,
+            target_label,
+            scroll = model.log_scroll,
+        );
+
+        let block = Block::default()
+            .title(Span::styled(title, theme.title))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Thick)
+            .border_style(theme.border);
+
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        // Build lines from the log buffer.
+        let all_lines: Vec<&str> = model.log_buffer.lines().collect();
+        let line_count = all_lines.len();
+
+        if line_count == 0 {
+            // Show empty or ended message.
+            let msg = if model.log_ended {
+                strings::LOGS_ENDED
+            } else {
+                strings::LOGS_EMPTY
+            };
+            let p = Paragraph::new(Span::styled(msg, theme.muted));
+            frame.render_widget(p, inner);
+            return;
+        }
+
+        // Compute the visible window: log_scroll = 0 means bottom (newest last).
+        let height = inner.height as usize;
+        let scroll_from_bottom = model.log_scroll;
+        let end_idx = line_count.saturating_sub(scroll_from_bottom);
+        let start_idx = end_idx.saturating_sub(height);
+
+        let visible: Vec<Line> = all_lines[start_idx..end_idx]
+            .iter()
+            .map(|l| Line::from(Span::raw(*l)))
+            .collect();
+
+        let mut p = Paragraph::new(visible);
+        if model.log_wrap {
+            p = p.wrap(Wrap { trim: false });
+        }
+        frame.render_widget(p, inner);
+
+        // Hint footer in the status area (render at bottom of inner).
+        if model.log_ended {
+            let ended_line = Span::styled(strings::LOGS_ENDED, theme.muted);
+            let ended_p = Paragraph::new(ended_line);
+            let footer_area = ratatui::layout::Rect {
+                y: inner.y + inner.height.saturating_sub(1),
+                height: 1,
+                ..inner
+            };
+            frame.render_widget(ended_p, footer_area);
+        }
+    }
+
+    // ─── Bundle 3: History overlay ────────────────────────────────────────────
+
+    fn render_history(
+        frame: &mut Frame,
+        area: ratatui::layout::Rect,
+        query: &str,
+        matches: &[usize],
+        cursor: usize,
+        entries: &[crate::tui::history::HistoryEntry],
+        theme: &Theme,
+    ) {
+        use crate::tui::strings;
+
+        // Similar shape to render_palette: centered modal.
+        let horiz = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(5),
+                Constraint::Percentage(90),
+                Constraint::Percentage(5),
+            ])
+            .split(area);
+        let vert = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(10),
+                Constraint::Percentage(80),
+                Constraint::Percentage(10),
+            ])
+            .split(horiz[1]);
+        let modal = vert[1];
+
+        // Query input line.
+        let title_text = format!("{} [{}] /{}_", strings::HISTORY_TITLE, entries.len(), query);
+        let block = Block::default()
+            .title(Span::styled(title_text, theme.title))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(theme.accent);
+
+        let inner = block.inner(modal);
+        frame.render_widget(Clear, modal);
+        frame.render_widget(block, modal);
+
+        if matches.is_empty() {
+            let msg = Paragraph::new(Span::styled(strings::HISTORY_EMPTY, theme.muted));
+            frame.render_widget(msg, inner);
+            return;
+        }
+
+        let height = inner.height.saturating_sub(1) as usize; // reserve footer
+        let total = matches.len();
+        let start = if cursor >= height {
+            cursor - height + 1
+        } else {
+            0
+        }
+        .min(total.saturating_sub(height));
+        let end = (start + height).min(total);
+
+        let rows: Vec<Row> = matches[start..end]
+            .iter()
+            .enumerate()
+            .map(|(i, &entry_idx)| {
+                let global_cursor = start + i;
+                let is_selected = global_cursor == cursor;
+                let entry = &entries[entry_idx];
+                let status_str = match entry.status {
+                    Some(0) => "ok",
+                    Some(_) => "err",
+                    None => "-",
+                };
+                let style = if is_selected {
+                    theme.selection
+                } else {
+                    theme.muted
+                };
+                Row::new(vec![
+                    Cell::from(Span::styled(status_str.to_string(), style)),
+                    Cell::from(Span::styled(entry.argv.clone(), style)),
+                ])
+            })
+            .collect();
+
+        let table =
+            Table::new(rows, [Constraint::Length(4), Constraint::Min(10)]).block(Block::default());
+        frame.render_widget(table, inner);
+
+        // Hint at bottom.
+        let hint_area = ratatui::layout::Rect {
+            y: inner.y + inner.height.saturating_sub(1),
+            height: 1,
+            ..inner
+        };
+        let hint = Paragraph::new(Span::styled(strings::HISTORY_HINT, theme.muted));
+        frame.render_widget(hint, hint_area);
     }
 }
 

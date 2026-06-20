@@ -191,6 +191,13 @@ pub fn build_dbox_list_argv() -> Vec<String> {
     vec!["list".to_string()]
 }
 
+/// Build the argv for `<backend> logs -f <id>`.
+/// This is an ENGINE call (podman/docker), not a distrobox subcommand.
+/// Used for the live log streaming pane (Bundle 3 S5).
+pub fn build_logs_argv(id: &str) -> Vec<String> {
+    vec!["logs".to_string(), "-f".to_string(), id.to_string()]
+}
+
 /// Build the argv for `<backend> stats <id> --no-stream --format json`.
 /// This is an ENGINE call (podman/docker), not a distrobox subcommand.
 #[allow(dead_code)]
