@@ -1,0 +1,24 @@
+{
+  "envelope_version": "2.0",
+  "message_id": "48f2cff7-83b9-4232-909e-b3473f75d17b",
+  "thread_id": "c9a39625-5e50-4122-abe5-f340618c3c9f",
+  "from": "spectra",
+  "to": "apivr",
+  "performative": "PROPOSE",
+  "edge_origin": "roster",
+  "created_at": "2026-06-20",
+  "artifact": {
+    "kind": "spec",
+    "spec_id": "2026-06-20-tui-bundle2-living-box",
+    "path": "2026-06-20-tui-bundle2-living-box.md",
+    "title": "cbox TUI Bundle 2 Living Box"
+  },
+  "integrity": {
+    "method": "sha256",
+    "value": "c3c32ee2c70987a62f17c5972f2962fe082235a95d0003d6fa258aeb27b8a9bc"
+  },
+  "trust_level": "standard",
+  "required_sections": ["stories", "validation_gates", "agent_hints", "given_when_then"],
+  "confidence": 0.87,
+  "decision": "AUTO_PROCEED"
+}

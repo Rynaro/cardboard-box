@@ -2,10 +2,14 @@
 //!
 //! Available regardless of the `tui` feature so tests can import it.
 
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use crate::core::spec::{BoxRow, DoctorResult, EnterSpec, InspectResult, ProvisionStepResult};
+use crate::core::spec::{
+    BoxRow, DoctorResult, EnterSpec, InspectResult, ProvisionStepResult, StatsSample,
+};
 use crate::dbox::backend::Backend;
+use crate::tui::bulk::BulkOp;
 use crate::tui::cmdlog::CmdLog;
 use crate::tui::theme::{ColorMode, Skin};
 
@@ -163,7 +167,7 @@ impl Default for FilterState {
 // ─── Overlay (T2 – cheatsheet / command-log overlays) ────────────────────────
 
 /// Which (if any) non-filter overlay is currently active.
-/// Cheatsheet and CommandLog are mutually exclusive — the enum enforces that.
+/// Cheatsheet, CommandLog, and Palette are mutually exclusive — the enum enforces that.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Overlay {
     #[default]
@@ -172,6 +176,78 @@ pub enum Overlay {
     CommandLog {
         scroll: usize,
     },
+    /// Command palette — fuzzy-searchable overlay mapping labels to actions.
+    Palette {
+        /// Raw user input (what they typed).
+        query: String,
+        /// Indices into the palette's action source, best-rank first.
+        matches: Vec<usize>,
+        /// Selection within `matches` (0-based).
+        cursor: usize,
+        /// When `true`, the source is restricted to the four bulk actions (opened via `b`).
+        bulk_only: bool,
+    },
+}
+
+// ─── BulkConfirmState ────────────────────────────────────────────────────────
+
+/// State for the bulk-confirm modal.
+#[derive(Debug, Clone)]
+pub struct BulkConfirmState {
+    pub op: BulkOp,
+    /// Box NAMES selected by the predicate (for display and fan-out).
+    pub targets: Vec<String>,
+    /// Backends parallel to `targets` (same index — for grouped fan-out).
+    pub target_backends: Vec<String>,
+    /// Typed-phrase buffer (only meaningful for `DestroyUnmanaged`).
+    pub typed_confirm: String,
+}
+
+// ─── StatsHistory ────────────────────────────────────────────────────────────
+
+/// Maximum number of stats samples kept in the bounded ring buffers (~2 min of history).
+pub const STATS_HISTORY_CAP: usize = 60;
+
+/// Bounded stats history for the Detail screen sparklines.
+#[derive(Debug, Clone)]
+pub struct StatsHistory {
+    /// Which box these samples belong to.
+    pub box_id: String,
+    /// CPU% × 100, rounded to u64 (Sparkline data).
+    pub cpu: VecDeque<u64>,
+    /// Memory used in bytes (Sparkline data).
+    pub mem_used: VecDeque<u64>,
+    /// Latest memory limit in bytes (for the scale label).
+    pub mem_limit: u64,
+}
+
+impl StatsHistory {
+    pub fn new(box_id: impl Into<String>) -> Self {
+        Self {
+            box_id: box_id.into(),
+            cpu: VecDeque::new(),
+            mem_used: VecDeque::new(),
+            mem_limit: 0,
+        }
+    }
+
+    /// Push a new sample into the bounded ring buffers.
+    /// Drops the oldest sample when either buffer exceeds `STATS_HISTORY_CAP`.
+    pub fn push_sample(&mut self, sample: &StatsSample) {
+        // CPU stored as integer percentage × 100 (i.e. 12.5% → 1250).
+        let cpu_val = (sample.cpu_pct * 100.0).round() as u64;
+        self.cpu.push_back(cpu_val);
+        if self.cpu.len() > STATS_HISTORY_CAP {
+            self.cpu.pop_front();
+        }
+
+        self.mem_used.push_back(sample.mem_used);
+        if self.mem_used.len() > STATS_HISTORY_CAP {
+            self.mem_used.pop_front();
+        }
+
+        self.mem_limit = sample.mem_limit;
+    }
 }
 
 // ─── Toast / ToastKind (T5 – transient notifications) ─────────────────────────
@@ -244,6 +320,18 @@ pub struct Model {
     pub toasts: Vec<Toast>,
     /// Shared command-log ring buffer. Created in `app::run`; shared with `LoggingRunner`.
     pub cmdlog: Arc<Mutex<CmdLog>>,
+
+    // ── Bundle 2 fields ──────────────────────────────────────────────────────
+    /// Value of `spinner_tick` when the last silent poll was dispatched; init 0.
+    pub last_poll_tick: usize,
+    /// A silent effect is dispatched but not yet completed; init false.
+    /// NEVER sets `busy` — that would block all keys (GAP-1).
+    pub poll_in_flight: bool,
+    /// Bulk-confirm modal state (`None` = modal closed).
+    pub bulk_confirm: Option<BulkConfirmState>,
+    /// Bounded stats history for the Detail screen sparklines.
+    /// `None` until the first sample arrives / when not on Detail.
+    pub stats_history: Option<StatsHistory>,
 }
 
 impl Model {
@@ -275,6 +363,11 @@ impl Model {
             skin: Skin::Kraft,
             toasts: Vec::new(),
             cmdlog: Arc::new(Mutex::new(CmdLog::new(200))),
+            // Bundle 2 defaults.
+            last_poll_tick: 0,
+            poll_in_flight: false,
+            bulk_confirm: None,
+            stats_history: None,
         }
     }
 

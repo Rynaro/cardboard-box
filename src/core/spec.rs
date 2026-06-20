@@ -394,6 +394,30 @@ pub struct PackageDiff {
     pub removed: Vec<String>,
 }
 
+// ─── Bundle 2: stats spec types ─────────────────────────────────────────────
+
+/// Spec for a per-box stats poll (engine call: `<backend> stats <id> --no-stream --format json`).
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct StatsSpec {
+    /// The container ID (not name) — matches `BoxRow.id`.
+    pub id: String,
+    /// The engine the box lives on.
+    pub backend: Backend,
+}
+
+/// A single stats sample parsed from the engine JSON.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Default)]
+pub struct StatsSample {
+    /// CPU usage as a percentage (e.g. 12.5 for 12.5%).
+    pub cpu_pct: f64,
+    /// Memory currently in use, in bytes.
+    pub mem_used: u64,
+    /// Memory limit for the container, in bytes.
+    pub mem_limit: u64,
+}
+
 fn get_uid() -> u32 {
     #[cfg(unix)]
     unsafe {

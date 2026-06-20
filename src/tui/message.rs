@@ -1,6 +1,8 @@
 //! Messages that the TUI event loop feeds into the pure reducer.
 
-use crate::core::spec::{ApplyOutcome, BoxRow, DoctorResult, InspectResult, UpOutcome};
+use crate::core::spec::{
+    ApplyOutcome, BoxRow, DoctorResult, InspectResult, StatsSample, UpOutcome,
+};
 use crate::error::CboxError;
 
 // Re-export crossterm's KeyEvent under the tui feature so message.rs stays
@@ -65,4 +67,10 @@ pub enum Message {
     // ── terminal-handoff completions ──
     EnterReturned(Result<i32, CboxError>),
     EditReturned(Result<(), CboxError>),
+
+    // ── Bundle 2: silent poll completions ──
+    /// Silent list refresh complete — does NOT set busy/status/toast on Ok.
+    SilentListLoaded(Result<Vec<BoxRow>, CboxError>),
+    /// Stats poll complete — feeds history buffer on Ok, swallowed silently on Err.
+    StatsLoaded(Result<StatsSample, CboxError>),
 }

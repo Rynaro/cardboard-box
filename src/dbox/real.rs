@@ -1,5 +1,10 @@
 use super::runner::{CmdOutput, DistroboxRunner, Invocation, RunMode, RunnerError};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+/// Poll grain for the `try_wait` watchdog loop (~25ms → kill latency ≤ one grain past deadline).
+#[allow(dead_code)]
+const POLL_GRAIN_MS: u64 = 25;
 
 /// Real runner — uses std::process::Command.
 pub struct RealRunner;
@@ -39,6 +44,75 @@ impl DistroboxRunner for RealRunner {
                     }
                 }
             })?;
+
+        let status = output.status.code().unwrap_or(-1);
+        Ok(CmdOutput {
+            status,
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            argv,
+        })
+    }
+
+    fn run_with_timeout(
+        &self,
+        inv: Invocation,
+        timeout: Duration,
+    ) -> Result<CmdOutput, RunnerError> {
+        // DryRun short-circuits exactly as run() does (no spawn needed).
+        if inv.mode == RunMode::DryRun {
+            return self.run(inv);
+        }
+
+        let argv = inv.argv();
+
+        let mut child = Command::new(&inv.program)
+            .args(&inv.args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    RunnerError::BinaryNotFound {
+                        program: inv.program.clone(),
+                    }
+                } else {
+                    RunnerError::Io {
+                        program: inv.program.clone(),
+                        source: e,
+                    }
+                }
+            })?;
+
+        let deadline = Instant::now() + timeout;
+        loop {
+            match child.try_wait() {
+                Ok(Some(_status)) => break, // finished in time → collect output below
+                Ok(None) => {
+                    if Instant::now() >= deadline {
+                        let _ = child.kill();
+                        let _ = child.wait(); // reap to avoid zombie
+                        return Err(RunnerError::Timeout {
+                            program: inv.program.clone(),
+                            seconds: timeout.as_secs(),
+                        });
+                    }
+                    std::thread::sleep(Duration::from_millis(POLL_GRAIN_MS));
+                }
+                Err(e) => {
+                    return Err(RunnerError::Io {
+                        program: inv.program.clone(),
+                        source: e,
+                    })
+                }
+            }
+        }
+
+        // Child finished within the deadline — collect output.
+        let output = child.wait_with_output().map_err(|e| RunnerError::Io {
+            program: inv.program.clone(),
+            source: e,
+        })?;
 
         let status = output.status.code().unwrap_or(-1);
         Ok(CmdOutput {

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::error::exit;
 use thiserror::Error;
 
@@ -72,6 +74,9 @@ pub enum RunnerError {
         program: String,
         source: std::io::Error,
     },
+
+    #[error("{program} timed out after {seconds}s")]
+    Timeout { program: String, seconds: u64 },
 }
 
 impl RunnerError {
@@ -80,6 +85,8 @@ impl RunnerError {
             RunnerError::BinaryNotFound { .. } => exit::SOFTWARE,
             RunnerError::Io { .. } => exit::IOERR,
             RunnerError::InteractiveSpawnFailed { .. } => exit::IOERR,
+            // Timeout maps to TEMPFAIL: backend not responding right now.
+            RunnerError::Timeout { .. } => exit::TEMPFAIL,
         }
     }
 }
@@ -93,4 +100,22 @@ pub trait DistroboxRunner: Send + Sync {
 
     /// Interactive mode: inherit TTY, return exit code.
     fn run_interactive(&self, inv: Invocation) -> Result<i32, RunnerError>;
+
+    /// Capture mode with a wall-clock deadline.
+    ///
+    /// Default: ignore the deadline and delegate to `run` (preserves behavior
+    /// for runners that can't time out, e.g. the simplest mocks). `RealRunner`
+    /// overrides this with a real poll-`try_wait` watchdog.
+    ///
+    /// ONLY called from the two silent poll effects (`SilentLoadList`,
+    /// `StatsPoll`) — the rest of the CLI keeps using `run`/`run_interactive`
+    /// unchanged (GAP-1 containment).
+    fn run_with_timeout(
+        &self,
+        inv: Invocation,
+        timeout: Duration,
+    ) -> Result<CmdOutput, RunnerError> {
+        let _ = timeout;
+        self.run(inv)
+    }
 }

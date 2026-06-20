@@ -4,14 +4,17 @@
 
 use std::sync::Arc;
 
+use std::time::Duration;
+
 use crate::core;
 use crate::core::spec::{
-    ApplySpec, CreateSpec, DoctorSpec, EnterSpec, InspectSpec, RmSpec, StopSpec, UpSpec,
+    ApplySpec, CreateSpec, DoctorSpec, EnterSpec, InspectSpec, RmSpec, StatsSpec, StopSpec, UpSpec,
 };
 use crate::core::state_store::{GuestStateStore, ProvisionStateStore};
 use crate::dbox::runner::DistroboxRunner;
 use crate::secret::{SecretError, SecretStore};
 use crate::tui::message::{CreateOutcome, Message, RmOutcome, StopOutcome};
+use crate::tui::poll::{LIST_TIMEOUT_SECS, STATS_TIMEOUT_SECS};
 
 /// No-op secret store for TUI context (keyring not wired into TUI).
 struct TuiNoOpStore;
@@ -66,6 +69,15 @@ pub enum Effect {
     SuspendAndEdit(String),
     /// Signal the event loop to exit cleanly.
     Quit,
+
+    // ── Bundle 2: silent poll effects ────────────────────────────────────────
+    /// Silent list refresh — like `LoadList` but the completion does NOT set
+    /// `busy` or `status`; it only updates `model.boxes` if changed.
+    /// Uses `run_with_timeout` (LIST_TIMEOUT_SECS).
+    SilentLoadList,
+    /// Per-box stats poll for the Detail screen sparklines.
+    /// Uses `run_with_timeout` (STATS_TIMEOUT_SECS).
+    StatsPoll(StatsSpec),
 }
 
 /// Execute a data effect synchronously on the worker thread.
@@ -127,6 +139,20 @@ pub fn execute_effect(
 
         // These are handled by the main thread, not the worker.
         Effect::SuspendAndEnter(_) | Effect::SuspendAndEdit(_) | Effect::Quit => None,
+
+        // ── Bundle 2: silent poll effects ────────────────────────────────────
+        Effect::SilentLoadList => {
+            let timeout = Duration::from_secs(LIST_TIMEOUT_SECS);
+            let result =
+                core::list_all_with_timeout(backends, runner.as_ref(), timeout).map(|o| o.boxes);
+            Some(Message::SilentListLoaded(result))
+        }
+
+        Effect::StatsPoll(spec) => {
+            let timeout = Duration::from_secs(STATS_TIMEOUT_SECS);
+            let result = core::stats(&spec, runner.as_ref(), timeout);
+            Some(Message::StatsLoaded(result))
+        }
     }
 }
 

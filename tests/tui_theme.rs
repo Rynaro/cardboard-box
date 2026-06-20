@@ -377,6 +377,24 @@ fn ac_copy_1_all_consts_non_empty_and_compliant() {
         ("CMDLOG_TITLE", strings::CMDLOG_TITLE),
         ("CMDLOG_EMPTY", strings::CMDLOG_EMPTY),
         ("CMDLOG_HINT", strings::CMDLOG_HINT),
+        // Bundle 2: bulk operation copy consts (AC-COPY-1 extension).
+        ("BULK_PRUNE_TITLE", strings::BULK_PRUNE_TITLE),
+        ("BULK_STOP_TITLE", strings::BULK_STOP_TITLE),
+        (
+            "BULK_DESTROY_MANAGED_TITLE",
+            strings::BULK_DESTROY_MANAGED_TITLE,
+        ),
+        (
+            "BULK_DESTROY_UNMANAGED_TITLE",
+            strings::BULK_DESTROY_UNMANAGED_TITLE,
+        ),
+        ("BULK_UNMANAGED_WARN", strings::BULK_UNMANAGED_WARN),
+        ("BULK_UNMANAGED_PHRASE", strings::BULK_UNMANAGED_PHRASE),
+        ("BULK_EMPTY", strings::BULK_EMPTY),
+        // Bundle 2: palette copy consts.
+        ("PALETTE_TITLE", strings::PALETTE_TITLE),
+        ("PALETTE_NO_MATCH", strings::PALETTE_NO_MATCH),
+        ("PALETTE_HINT", strings::PALETTE_HINT),
     ];
 
     for (name, value) in consts {

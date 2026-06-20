@@ -1,0 +1,262 @@
+spec_id: 2026-06-20-tui-bundle2-living-box
+title: cbox TUI Bundle 2 "Living Box"
+intent: REQUEST_CHANGE
+status: decision_ready
+confidence: 0.87
+decision: AUTO_PROCEED
+release_target:
+  bump: minor
+  version: 0.10.0
+  mechanism: release-please (feat -> minor)
+coder: vivi
+micro_task_owner: kupo
+build:
+  containerized: true
+  host_cargo: forbidden
+  verifiers: [make build, make release, make test, make fmt-check, make lint, make lint-lean, make check]
+  tui_feature_default: true
+
+locked:
+  features:
+    - live_cpu_mem_sparklines_on_detail
+    - live_list_auto_refresh_2s
+    - colon_command_palette
+    - bulk_ops_all_four
+  bulk_ops:
+    - {id: prune_stopped, predicate: "!is_running(status)", effect: Rm}
+    - {id: stop_running, predicate: "is_running(status)", effect: Stop}
+    - {id: destroy_managed, predicate: "cbox_managed", effect: Rm}
+    - {id: destroy_unmanaged, predicate: "!cbox_managed", effect: Rm, dangerous: true, guard: typed_phrase}
+  gap_resolutions:
+    GAP1: capture_timeout_seam + silent_poll_gating (never busy, coalesce in-flight)
+    GAP2: bulk_filter_over_model_boxes (NOT boxfile reconcile); reuse multi-name Rm/Stop
+    GAP3: first_class_Action_enum single-sources keymap+palette+cheatsheet; dispatch_action in reducer
+  voice_rule: show_dont_tell  # banned: cozy/beautiful/friendly/delightful/cute/lovely
+
+verified_anchors:
+  gap1_no_timeout: {file: src/dbox/real.rs, lines: "8-50 (Command::output), 52-76 (.status())"}
+  gap1_single_worker: {file: src/tui/app.rs, lines: "122 sync_channel(4), 124-131 single thread, 316 try_send drops"}
+  gap1_busy_gate: {file: src/tui/update.rs, lines: "78-80 busy blocks keys, 362-365 manual r sets busy"}
+  gap2_batch_specs: {file: src/core/spec.rs, lines: "103-122 RmSpec/StopSpec names:Vec<String>"}
+  gap2_managed_label: {file: src/core/mod.rs, lines: "231-233 cbox.managed -> BoxRow.cbox_managed"}
+  gap2_core_batch: {file: src/core/mod.rs, lines: "308 stop, 331 rm"}
+  gap3_action_string: {file: src/tui/keymap.rs, lines: "15-20 KeyBinding.action display-only str; 224 keymap_for; 241 help_line"}
+  tick_seam: {file: src/tui/update.rs, lines: "35-46 Tick returns vec![]"}
+  poll_ms: {file: src/tui/app.rs, line: 41, value: 50}
+  spinner_tick: {file: src/tui/model.rs, line: 230, type: usize}
+  stats_engine_call_pattern: {file: src/core/mod.rs, line: 373, note: "inspect uses Invocation::new(backend.as_str(), ...)"}
+  argv_builders: {file: src/dbox/argv.rs, lines: "166-186 build_list/inspect_argv -> Vec<String>"}
+  serde_json_in_use: {file: src/core/mod.rs, line: 211}
+  list_all: {file: src/core/mod.rs, lines: "116-137"}
+  boxrow: {file: src/core/spec.rs, lines: "177-187 status/cbox_managed/id/backend"}
+  render_detail: {file: src/tui/view.rs, lines: "260-354 single Paragraph on full area; Layout imported line 8"}
+  overlay_enum: {file: src/tui/model.rs, lines: "167-175 has CommandLog{scroll}"}
+  filter_template: {file: src/tui/model.rs, lines: "137-145 FilterState"}
+  fuzzy_rank: {file: src/tui/filter.rs, line: 26}
+  mock_runner: {file: src/dbox/mock.rs, lines: "159-183 run/run_interactive"}
+  voice_test: {file: tests/tui_theme.rs, lines: "351 BANNED, 362-395 ac_copy_1"}
+  ecl_version_present: {path: .eidolons/spectra/ECL_VERSION, present: true}
+
+concurrency_design:  # GAP-1
+  timeout_seam:
+    trait_method: "fn run_with_timeout(&self, inv, timeout: Duration) -> Result<CmdOutput, RunnerError>"
+    default_impl: "delegates to run(inv) (ignores timeout) -> existing impls unaffected"
+    real_impl: "spawn child; loop try_wait with deadline; child.kill()+wait() on expiry; return Timeout err"
+    new_error: "RunnerError::Timeout { program, seconds } -> exit_code = TEMPFAIL(75)"
+    poll_grain_ms: 25
+    defaults: {STATS_TIMEOUT_SECS: 3, LIST_TIMEOUT_SECS: 5}
+    callers: [Effect::SilentLoadList, Effect::StatsPoll]   # ONLY these; rest of CLI unchanged
+  poll_gating:
+    pure_helper: "should_poll(&Model) -> Option<PollKind>  (src/tui/poll.rs, lean-clean, returns PollKind not Effect)"
+    poll_kind: "enum PollKind { List, Stats { id, backend } }"
+    fires_iff: ["spinner_tick - last_poll_tick >= POLL_INTERVAL_TICKS(40)", "!busy", "!poll_in_flight"]
+    on_dispatch: ["last_poll_tick = spinner_tick", "poll_in_flight = true", "NEVER busy"]
+    on_completion: ["poll_in_flight = false", "never busy", "never toast", "never set status"]
+    no_freeze_proof: "AC-TIMEOUT-1 (returns within deadline) + AC-POLL-1/2/3 (never busy, coalesced)"
+
+data_model:
+  new_model_fields:
+    - {name: last_poll_tick, type: usize, init: 0}
+    - {name: poll_in_flight, type: bool, init: false}
+    - {name: bulk_confirm, type: "Option<BulkConfirmState>", init: None}
+    - {name: stats_history, type: "Option<StatsHistory>", init: None}
+  new_consts:
+    - {name: POLL_INTERVAL_TICKS, value: 40}
+    - {name: STATS_HISTORY_CAP, value: 60}
+  new_effects:
+    - {name: SilentLoadList, worker: true, runner: run_with_timeout, timeout: LIST_TIMEOUT, completion: SilentListLoaded}
+    - {name: "StatsPoll(StatsSpec)", worker: true, runner: run_with_timeout, timeout: STATS_TIMEOUT, completion: StatsLoaded}
+  new_messages:
+    - "SilentListLoaded(Result<Vec<BoxRow>, CboxError>)"
+    - "StatsLoaded(Result<StatsSample, CboxError>)"
+  bulk_fanout: "reuse Effect::Rm / Effect::Stop with multi-name specs grouped by BoxRow.backend (<=2 effects, under 4-deep channel)"
+  action_enum:
+    module: src/tui/action.rs  # always-compiled, lean-clean
+    variants: [MoveUp, MoveDown, Open, Inspect, Create, Stop, Destroy, Apply, Edit, Refresh, Filter, Cheatsheet, Doctor, CycleSkin, CommandLog, Palette, Quit, BulkPruneStopped, BulkStopRunning, BulkDestroyManaged, BulkDestroyUnmanaged]
+    methods: [label, in_palette, default_key, palette_actions]
+    keymap_migration: "KeyBinding.action: &str -> Action; cheatsheet/help_line use Action::label()"
+    dispatch: "dispatch_action(model, Action) -> Vec<Effect>; key arms + palette both route through extracted helpers"
+  new_core:
+    - {fn: "build_stats_argv(id)", file: src/dbox/argv.rs, returns: "[stats, id, --no-stream, --format, json]"}
+    - {fn: "core::stats(spec, runner, timeout)", file: src/core/mod.rs, engine_call: "Invocation::new(backend.as_str(), ...)"}
+    - {fn: "core::list_all_with_timeout(backends, runner, timeout)", file: src/core/mod.rs}
+    - {struct: "StatsSpec { id, backend }", file: src/core/spec.rs}
+    - {struct: "StatsSample { cpu_pct: f64, mem_used: u64, mem_limit: u64 }", file: src/core/spec.rs}
+    - {fn: "parse_stats_json (defensive; empty/null/malformed -> Err, no panic)", file: src/core/mod.rs}
+  stats_history:
+    cap: 60
+    buffers: [cpu (VecDeque<u64>), mem_used (VecDeque<u64>), mem_limit (u64)]
+    keyed_by: box_id
+    reset_on: [box_change, leave_detail]
+    push: "push_sample (bounded ring, drops front past cap)"
+
+keymap_palette_cheatsheet:
+  new_keys:
+    - {key: ":", action: Palette, scope: global, conflict: none}
+    - {key: "b", action: bulk_scoped_palette, scope: list, conflict: none}
+  palette:
+    overlay_variant: "Overlay::Palette { query, matches, cursor, bulk_only }"
+    source: "action::palette_actions() (or bulk subset when bulk_only)"
+    ranking: "fuzzy_rank(query, &labels)  # reuses src/tui/filter.rs:26"
+    enter: "dispatch_action(model, actions[matches[cursor]])"
+    j_k_in_query: text  # nav is arrows only (consistent with filter R-8)
+  cheatsheet: "renders keymap_for(ctx) with kb.action.label(); add KeyContext::Palette rows"
+
+bulk_design:  # GAP-2
+  predicate_helper: "bulk_targets(op, &[BoxRow]) -> Vec<usize>  (src/tui/bulk.rs, lean-clean)"
+  is_running_shared: "extract is_running(status) helper (mirrors update.rs:265-266) for List/Detail/bulk"
+  confirm:
+    modal: "reuse ConfirmDestroy centered Clear+Rect pattern; render off model.bulk_confirm"
+    shows: [target_box_names, count]
+    nondangerous: "y/enter confirm, n/esc cancel (single keypress OK)"
+    dangerous_destroy_unmanaged:
+      guard: typed_phrase
+      phrase_const: "strings::BULK_UNMANAGED_PHRASE = \"DESTROY UNMANAGED\""
+      execute_iff: "typed_confirm == phrase AND Enter"
+      single_keypress_destroys: false
+  fanout: "group targets by BoxRow.backend; one Effect::Rm/Stop per group; busy=true, Screen::Progress; existing RmDone/StopDone refresh"
+  copy_consts: [BULK_PRUNE_TITLE, BULK_STOP_TITLE, BULK_DESTROY_MANAGED_TITLE, BULK_DESTROY_UNMANAGED_TITLE, BULK_UNMANAGED_WARN, BULK_UNMANAGED_PHRASE, BULK_EMPTY]
+
+stories:
+  - id: T1
+    title: Capture timeout seam (GAP-1 core)
+    timebox: "<=3d"
+    agent_class: builder
+    files: [src/dbox/runner.rs, src/dbox/real.rs, src/core/mod.rs, tests/tui_bundle2.rs]
+    depends: []
+    context_files: [src/dbox/real.rs, src/dbox/runner.rs, src/core/mod.rs, src/dbox/mock.rs]
+    verifier: [make build, make lint-lean, make test]
+    acceptance: [AC-TIMEOUT-1, AC-TIMEOUT-2, AC-TIMEOUT-3]
+    risk_tags: [P0]
+  - id: T2
+    title: Silent-poll gating (GAP-1 gate)
+    timebox: "<=3d"
+    agent_class: builder
+    files: [src/tui/poll.rs, src/tui/model.rs, src/tui/effect.rs, src/tui/message.rs, src/tui/update.rs, tests/tui_bundle2.rs]
+    depends: [T1]
+    context_files: [src/tui/update.rs, src/tui/model.rs, src/tui/app.rs, src/tui/effect.rs]
+    verifier: [make build, make lint-lean, make test]
+    acceptance: [AC-POLL-1, AC-POLL-2, AC-POLL-3, AC-POLL-4, AC-POLL-5]
+    risk_tags: [P0, P1]
+  - id: T3
+    title: Action enum (GAP-3) + keymap migration + reducer dispatch
+    timebox: "<=3d"
+    agent_class: builder
+    files: [src/tui/action.rs, src/tui/keymap.rs, src/tui/update.rs, src/tui/mod.rs, tests/tui_keymap.rs, tests/tui_bundle2.rs]
+    depends: []
+    context_files: [src/tui/keymap.rs, src/tui/update.rs, tests/tui_keymap.rs]
+    verifier: [make build, make lint-lean, make test]
+    acceptance: [AC-ACTION-1, AC-ACTION-2, AC-ACTION-3]
+    risk_tags: [P0, P1]
+  - id: T4
+    title: ":" command palette
+    timebox: "<=3d"
+    agent_class: builder
+    files: [src/tui/model.rs, src/tui/keymap.rs, src/tui/update.rs, src/tui/view.rs, src/tui/strings.rs, tests/tui_bundle2.rs]
+    depends: [T3]
+    context_files: [src/tui/model.rs, src/tui/update.rs, src/tui/filter.rs, src/tui/view.rs]
+    verifier: [make build, make test]
+    acceptance: [AC-PALETTE-1, AC-PALETTE-2, AC-PALETTE-3, AC-PALETTE-4]
+    risk_tags: [P2]
+  - id: T5
+    title: Bulk operations (all four; dangerous typed-phrase guard)
+    timebox: "<=3d"
+    agent_class: builder
+    files: [src/tui/bulk.rs, src/tui/model.rs, src/tui/update.rs, src/tui/view.rs, src/tui/strings.rs, tests/tui_bundle2.rs]
+    depends: [T3, T4]
+    context_files: [src/tui/update.rs, src/core/spec.rs, src/core/mod.rs, src/tui/view.rs]
+    verifier: [make build, make lint-lean, make test]
+    acceptance: [AC-BULK-FILTER-1, AC-BULK-EMPTY, AC-BULK-FANOUT-1, AC-BULK-DANGER-1, AC-BULK-DANGER-2, AC-BULK-CONFIRM-NONDANGEROUS]
+    risk_tags: [P0, P1]
+  - id: T6
+    title: Live CPU/mem sparklines (highest new infra)
+    timebox: "<=5d"
+    agent_class: builder
+    files: [src/dbox/argv.rs, src/core/mod.rs, src/core/spec.rs, src/tui/model.rs, src/tui/poll.rs, src/tui/effect.rs, src/tui/message.rs, src/tui/update.rs, src/tui/view.rs, tests/tui_bundle2.rs]
+    depends: [T1, T2]
+    context_files: [src/core/mod.rs, src/dbox/argv.rs, src/tui/view.rs, src/tui/poll.rs]
+    verifier: [make build, make lint-lean, make test]
+    acceptance: [AC-STATS-ARGV-1, AC-STATS-PARSE-1, AC-STATS-PARSE-2, AC-STATS-PARSE-3, AC-HIST-1, AC-HIST-2, AC-STATS-STOPPED]
+    risk_tags: [P1, P2]
+  - id: K1
+    title: Extend AC-COPY-1 coverage + add AC-VOICE-1 over Action::label()
+    timebox: 1d
+    agent_class: speed  # Kupo micro-task, mechanical, <=2 files
+    files: [tests/tui_theme.rs, src/tui/strings.rs]
+    depends: [T4, T5]
+    context_files: [tests/tui_theme.rs, src/tui/strings.rs, src/tui/action.rs]
+    verifier: [make test]
+    acceptance: [AC-COPY-1, AC-VOICE-1]
+    risk_tags: [P1]
+    kupo_eligible: true
+  - id: FINAL
+    title: Full release gate
+    depends: [T1, T2, T3, T4, T5, T6, K1]
+    verifier: [make check]
+
+execution_plan:
+  order: [T1, T3, T2, T4, T5, T6, K1, FINAL]
+  parallelizable: ["T3 independent of T1/T2 (run alongside)"]
+  critical_path: [T1, T2, T6]
+
+validation_gates:
+  - {id: G-BUILD, cmd: make build}
+  - {id: G-LEAN, cmd: make lint-lean, note: "poll.rs/action.rs/bulk.rs/timeout seam lean-clean; nucleo+ratatui stay tui-gated"}
+  - {id: G-FMT, cmd: make fmt-check}
+  - {id: G-LINT, cmd: make lint}
+  - {id: G-TEST, cmd: make test, note: "all existing suites + tui_bundle2 green"}
+  - {id: G-NOFREEZE, checks: [AC-TIMEOUT-1, AC-POLL-1, AC-POLL-2, AC-POLL-3]}
+  - {id: G-DANGER, checks: [AC-BULK-DANGER-1, AC-BULK-DANGER-2]}
+  - {id: G-FINAL, cmd: make check}
+
+risks:
+  - {id: R-1, sev: P0, risk: "timeout change touches shared CLI Capture path", mit: "additive defaulted method; only silent effects call it", gate: [make test, make lint-lean, AC-TIMEOUT-1]}
+  - {id: R-2, sev: P0, risk: "Action extract-method changes key behavior", mit: "key arms+palette share extracted helpers", gate: [tui_update green, AC-ACTION-3]}
+  - {id: R-3, sev: P1, risk: "KeyBinding.action enum migration breaks tui_keymap", mit: "label() == prior strings", gate: [tui_keymap green, AC-ACTION-1]}
+  - {id: R-4, sev: P1, risk: "silent refresh races input/overlay/filter/selection", mit: "skip while busy, coalesce in-flight, clamp like handle_list_loaded", gate: [AC-POLL-4, AC-POLL-5]}
+  - {id: R-5, sev: P1, risk: "bulk fan-out overflows 4-deep channel (try_send drops)", mit: "group by backend -> <=2 effects", gate: [AC-BULK-FANOUT-1]}
+  - {id: R-6, sev: P0, risk: "dangerous bulk op reachable via single keypress", mit: "typed-phrase guard; y only appends", gate: [AC-BULK-DANGER-1, AC-BULK-DANGER-2]}
+  - {id: R-7, sev: P1, risk: "nucleo/ratatui/Effect leak into lean build", mit: "poll.rs returns PollKind; action/bulk import pure types; fuzzy stays tui-gated", gate: [make lint-lean]}
+  - {id: R-8, sev: P2, risk: "stats poll wrong backend/id", mit: "use BoxRow.id+backend; pin program", gate: [AC-STATS-ARGV-1]}
+  - {id: R-9, sev: P1, risk: "kill() leaves zombie / worker blocks", mit: "wait() reaps; watchdog owns child", gate: [AC-TIMEOUT-1, make build]}
+  - {id: R-10, sev: P2, risk: "':' / 'b' key collision", mit: "verified unbound; text inside palette", gate: [AC-PALETTE-1, AC-PALETTE-4]}
+  - {id: R-11, sev: P2, risk: "stats vs list contend for single in-flight slot", mit: "accepted; Detail prefers Stats, List refreshes on List", gate: [AC-STATS-STOPPED, AC-POLL-1]}
+
+flagged_decisions:
+  - id: D-1
+    stakes: low
+    topic: "bulk entry UX"
+    recommendation: ":" palette + "b" bulk-scoped fast-path (avoid burning 4 single keys)
+    alternative: "four direct keys (removes T5->T4 dependency)"
+    blocks: false
+
+new_test_files: [tests/tui_bundle2.rs]
+extended_test_files: [tests/tui_keymap.rs, tests/tui_theme.rs, tests/tui_update.rs]
+keep_green: [tests/tui_update.rs, tests/tui_effects.rs, tests/tui_theme.rs, tests/tui_bundle1.rs, tests/tui_keymap.rs, "CLI suites"]
+
+confidence_factors:
+  pattern_match: 0.92
+  requirement_clarity: 0.90
+  decomposition_stability: 0.84
+  constraint_compliance: 0.86
+  aggregate: 0.87

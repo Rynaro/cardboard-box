@@ -79,3 +79,31 @@ pub fn stopped(list: &str) -> String {
 pub fn applied(name: &str, ran: usize, skipped: usize, failed: usize) -> String {
     format!("Applied \"{name}\": {ran} ran, {skipped} skipped, {failed} failed")
 }
+
+// ─── Bundle 2: Bulk operation copy ───────────────────────────────────────────
+
+/// Title for the prune-stopped bulk confirm modal.
+pub const BULK_PRUNE_TITLE: &str = " prune stopped ";
+/// Title for the stop-running bulk confirm modal.
+pub const BULK_STOP_TITLE: &str = " stop all running ";
+/// Title for the destroy-cbox-managed bulk confirm modal.
+pub const BULK_DESTROY_MANAGED_TITLE: &str = " destroy cbox-managed ";
+/// Title for the destroy-NON-managed bulk confirm modal (dangerous).
+pub const BULK_DESTROY_UNMANAGED_TITLE: &str = " destroy NON-managed ";
+/// Warning shown in the dangerous destroy-unmanaged modal.
+pub const BULK_UNMANAGED_WARN: &str =
+    "These boxes were not packed by cbox. Destroying them is permanent.";
+/// The exact phrase the user must type to confirm the dangerous destroy-unmanaged op.
+/// AC-BULK-DANGER-1/2: tests assert `typed_confirm == BULK_UNMANAGED_PHRASE`.
+pub const BULK_UNMANAGED_PHRASE: &str = "DESTROY UNMANAGED";
+/// Shown when a bulk op finds no matching boxes.
+pub const BULK_EMPTY: &str = "Nothing to do — no boxes match.";
+
+// ─── Bundle 2: Palette copy ───────────────────────────────────────────────────
+
+/// Title for the command-palette overlay.
+pub const PALETTE_TITLE: &str = " : command palette ";
+/// Hint shown when the palette has no matches.
+pub const PALETTE_NO_MATCH: &str = "No matching actions.";
+/// Footer shown in the palette overlay.
+pub const PALETTE_HINT: &str = "↑↓ move · enter run · esc cancel";

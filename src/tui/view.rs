@@ -8,10 +8,14 @@ mod inner {
         layout::{Alignment, Constraint, Direction, Layout},
         style::{Modifier, Style},
         text::{Line, Span},
-        widgets::{Block, BorderType, Borders, Cell, Clear, Paragraph, Row, Table, Wrap},
+        widgets::{
+            Block, BorderType, Borders, Cell, Clear, Paragraph, Row, Sparkline, Table, Wrap,
+        },
         Frame,
     };
 
+    use crate::tui::action::{palette_actions, Action, BULK_ACTIONS};
+    use crate::tui::bulk::BulkOp;
     use crate::tui::keymap::{keymap_for, KeyContext};
     use crate::tui::model::{Model, Overlay, Screen, StatusLine, WizardStep};
     use crate::tui::strings;
@@ -64,6 +68,11 @@ mod inner {
             render_toasts(model, frame, chunks[0], &theme);
         }
 
+        // Bulk confirm modal rendered over everything (before overlays).
+        if model.bulk_confirm.is_some() {
+            render_bulk_confirm(model, frame, area, &theme);
+        }
+
         // Overlays rendered on top of everything.
         match &model.overlay {
             Overlay::None => {}
@@ -72,6 +81,14 @@ mod inner {
             }
             Overlay::CommandLog { scroll } => {
                 render_command_log(model, frame, area, *scroll, &theme);
+            }
+            Overlay::Palette {
+                query,
+                matches,
+                cursor,
+                bulk_only,
+            } => {
+                render_palette(frame, area, query, matches, *cursor, *bulk_only, &theme);
             }
         }
 
@@ -347,10 +364,109 @@ mod inner {
             }
         }
 
-        let p = Paragraph::new(lines)
-            .block(block)
-            .wrap(Wrap { trim: false });
-        frame.render_widget(p, area);
+        // Sparklines region (only when stats_history has samples).
+        let show_sparklines = model
+            .stats_history
+            .as_ref()
+            .map(|h| !h.cpu.is_empty())
+            .unwrap_or(false);
+
+        if show_sparklines {
+            // Split area: top = detail paragraph, bottom = sparklines.
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(10), Constraint::Length(6)])
+                .split(area);
+
+            let p = Paragraph::new(lines)
+                .block(block)
+                .wrap(Wrap { trim: false });
+            frame.render_widget(p, chunks[0]);
+
+            render_sparklines(model, frame, chunks[1], theme);
+        } else {
+            let p = Paragraph::new(lines)
+                .block(block)
+                .wrap(Wrap { trim: false });
+            frame.render_widget(p, area);
+        }
+    }
+
+    // ─── Sparklines (Bundle 2) ────────────────────────────────────────────────
+
+    fn render_sparklines(
+        model: &Model,
+        frame: &mut Frame,
+        area: ratatui::layout::Rect,
+        theme: &Theme,
+    ) {
+        let history = match &model.stats_history {
+            Some(h) => h,
+            None => return,
+        };
+
+        // Split into two rows: CPU on top, mem on bottom.
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Length(3)])
+            .split(area);
+
+        // CPU sparkline.
+        let cpu_data: Vec<u64> = history.cpu.iter().copied().collect();
+        let cpu_label = if let Some(&last) = history.cpu.back() {
+            format!(" CPU  {:.1}% ", last as f64 / 100.0)
+        } else {
+            " CPU ".to_string()
+        };
+        let cpu_sparkline = Sparkline::default()
+            .block(
+                Block::default()
+                    .title(Span::styled(cpu_label, theme.header_cell))
+                    .borders(Borders::LEFT | Borders::TOP | Borders::RIGHT)
+                    .border_style(theme.border),
+            )
+            .data(&cpu_data)
+            .max(10000) // CPU% × 100
+            .style(theme.accent);
+        frame.render_widget(cpu_sparkline, rows[0]);
+
+        // Mem sparkline.
+        let mem_data: Vec<u64> = history.mem_used.iter().copied().collect();
+        let mem_label = if let Some(&used) = history.mem_used.back() {
+            let limit = history.mem_limit;
+            format!(" mem  {} / {} ", format_bytes(used), format_bytes(limit))
+        } else {
+            " mem ".to_string()
+        };
+        let mem_max = if history.mem_limit > 0 {
+            history.mem_limit
+        } else {
+            1024 * 1024 * 1024 // 1 GiB fallback
+        };
+        let mem_sparkline = Sparkline::default()
+            .block(
+                Block::default()
+                    .title(Span::styled(mem_label, theme.header_cell))
+                    .borders(Borders::LEFT | Borders::BOTTOM | Borders::RIGHT)
+                    .border_style(theme.border),
+            )
+            .data(&mem_data)
+            .max(mem_max)
+            .style(theme.success);
+        frame.render_widget(mem_sparkline, rows[1]);
+    }
+
+    /// Format bytes as a human-readable string (MiB / GiB).
+    fn format_bytes(bytes: u64) -> String {
+        const MIB: u64 = 1024 * 1024;
+        const GIB: u64 = 1024 * 1024 * 1024;
+        if bytes >= GIB {
+            format!("{:.1}GiB", bytes as f64 / GIB as f64)
+        } else if bytes >= MIB {
+            format!("{:.0}MiB", bytes as f64 / MIB as f64)
+        } else {
+            format!("{bytes}B")
+        }
     }
 
     // ─── Create wizard ────────────────────────────────────────────────────────
@@ -761,7 +877,7 @@ mod inner {
                 Line::from(vec![
                     Span::styled(format!("  {:12}", kb.key), theme.accent),
                     Span::styled("  ", theme.muted),
-                    Span::raw(kb.action),
+                    Span::raw(kb.action.label()),
                 ])
             })
             .collect();
@@ -848,6 +964,207 @@ mod inner {
         frame.render_widget(p, inner);
     }
 
+    // ─── Palette overlay (Bundle 2) ───────────────────────────────────────────
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_palette(
+        frame: &mut Frame,
+        area: ratatui::layout::Rect,
+        query: &str,
+        matches: &[usize],
+        cursor: usize,
+        bulk_only: bool,
+        theme: &Theme,
+    ) {
+        let source: &[Action] = if bulk_only {
+            BULK_ACTIONS
+        } else {
+            palette_actions()
+        };
+
+        let modal_width = 60u16.min(area.width.saturating_sub(4));
+        let visible_rows = 10u16;
+        let modal_height = (visible_rows + 5).min(area.height.saturating_sub(4));
+        let modal_x = area.x + (area.width.saturating_sub(modal_width)) / 2;
+        let modal_y = area.y + (area.height.saturating_sub(modal_height)) / 2;
+
+        let modal_area = ratatui::layout::Rect {
+            x: modal_x,
+            y: modal_y,
+            width: modal_width,
+            height: modal_height,
+        };
+
+        frame.render_widget(Clear, modal_area);
+
+        let block = Block::default()
+            .title(Span::styled(
+                strings::PALETTE_TITLE,
+                theme.accent.add_modifier(Modifier::BOLD),
+            ))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Double)
+            .border_style(theme.accent);
+
+        let inner = block.inner(modal_area);
+        frame.render_widget(block, modal_area);
+
+        // Split: query bar at top, list below.
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(1)])
+            .split(inner);
+
+        // Query bar.
+        let query_display = format!("> {query}_");
+        let query_line = Paragraph::new(Span::styled(query_display, theme.accent));
+        frame.render_widget(query_line, chunks[0]);
+
+        // Match list.
+        if matches.is_empty() {
+            let p = Paragraph::new(Span::styled(strings::PALETTE_NO_MATCH, theme.muted));
+            frame.render_widget(p, chunks[1]);
+            return;
+        }
+
+        let list_area = chunks[1];
+        let max_rows = list_area.height as usize;
+        // Scroll window around cursor.
+        let start = if cursor >= max_rows {
+            cursor - max_rows + 1
+        } else {
+            0
+        };
+
+        let mut lines: Vec<Line> = Vec::new();
+        for (row_idx, &action_idx) in matches.iter().enumerate().skip(start).take(max_rows) {
+            if let Some(&action) = source.get(action_idx) {
+                let is_selected = row_idx == cursor;
+                let style = if is_selected {
+                    theme.selection.add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
+                let prefix = if is_selected { "> " } else { "  " };
+                lines.push(Line::from(Span::styled(
+                    format!("{prefix}{}", action.label()),
+                    style,
+                )));
+            }
+        }
+
+        let p = Paragraph::new(lines);
+        frame.render_widget(p, list_area);
+    }
+
+    // ─── Bulk confirm modal (Bundle 2) ────────────────────────────────────────
+
+    fn render_bulk_confirm(
+        model: &Model,
+        frame: &mut Frame,
+        area: ratatui::layout::Rect,
+        theme: &Theme,
+    ) {
+        let bulk = match &model.bulk_confirm {
+            Some(b) => b,
+            None => return,
+        };
+
+        let is_dangerous = bulk.op == BulkOp::DestroyUnmanaged;
+
+        let title = match bulk.op {
+            BulkOp::PruneStopped => strings::BULK_PRUNE_TITLE,
+            BulkOp::StopRunning => strings::BULK_STOP_TITLE,
+            BulkOp::DestroyManaged => strings::BULK_DESTROY_MANAGED_TITLE,
+            BulkOp::DestroyUnmanaged => strings::BULK_DESTROY_UNMANAGED_TITLE,
+        };
+
+        let n = bulk.targets.len();
+        let extra_rows = if is_dangerous { 4u16 } else { 2u16 };
+        let list_rows = (n as u16).min(8);
+        let modal_height = (list_rows + extra_rows + 5).min(area.height.saturating_sub(4));
+        let modal_width = 64u16.min(area.width.saturating_sub(4));
+        let modal_x = area.x + (area.width.saturating_sub(modal_width)) / 2;
+        let modal_y = area.y + (area.height.saturating_sub(modal_height)) / 2;
+
+        let modal_area = ratatui::layout::Rect {
+            x: modal_x,
+            y: modal_y,
+            width: modal_width,
+            height: modal_height,
+        };
+
+        frame.render_widget(Clear, modal_area);
+
+        let border_style = if is_dangerous {
+            theme.danger
+        } else {
+            theme.warning
+        };
+        let title_style = if is_dangerous {
+            theme.danger.add_modifier(Modifier::BOLD)
+        } else {
+            theme.warning.add_modifier(Modifier::BOLD)
+        };
+
+        let block = Block::default()
+            .title(Span::styled(title, title_style))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Double)
+            .border_style(border_style);
+
+        let inner = block.inner(modal_area);
+        frame.render_widget(block, modal_area);
+
+        let mut lines: Vec<Line> = Vec::new();
+
+        // Count line.
+        lines.push(Line::from(Span::styled(
+            format!("{n} boxes:"),
+            theme.header_cell,
+        )));
+
+        // Target list (capped).
+        let visible = bulk.targets.iter().take(8);
+        for name in visible {
+            lines.push(Line::from(format!("  {name}")));
+        }
+        if n > 8 {
+            lines.push(Line::from(Span::styled(
+                format!("  … and {} more", n - 8),
+                theme.muted,
+            )));
+        }
+
+        lines.push(Line::from(""));
+
+        if is_dangerous {
+            lines.push(Line::from(Span::styled(
+                strings::BULK_UNMANAGED_WARN,
+                theme.danger,
+            )));
+            lines.push(Line::from(""));
+            lines.push(Line::from(format!(
+                "Type {} to confirm:",
+                strings::BULK_UNMANAGED_PHRASE
+            )));
+            lines.push(Line::from(Span::styled(
+                format!("> {}_", bulk.typed_confirm),
+                theme.accent,
+            )));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled("esc  cancel", theme.muted)));
+        } else {
+            lines.push(Line::from(Span::styled(
+                "y / enter  confirm   ·   n / esc  cancel",
+                theme.muted,
+            )));
+        }
+
+        let p = Paragraph::new(lines).wrap(Wrap { trim: true });
+        frame.render_widget(p, inner);
+    }
+
     // ─── Toast stack ─────────────────────────────────────────────────────────
 
     fn render_toasts(model: &Model, frame: &mut Frame, area: ratatui::layout::Rect, theme: &Theme) {
@@ -903,7 +1220,7 @@ mod inner {
         // Derive the help string from the keymap (single source of truth, D-1).
         let help = keymap_for(KeyContext::List)
             .iter()
-            .map(|kb| format!("{} {}", kb.key, kb.action))
+            .map(|kb| format!("{} {}", kb.key, kb.action.label()))
             .collect::<Vec<_>>()
             .join(" · ");
 

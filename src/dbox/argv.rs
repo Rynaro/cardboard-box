@@ -191,6 +191,19 @@ pub fn build_dbox_list_argv() -> Vec<String> {
     vec!["list".to_string()]
 }
 
+/// Build the argv for `<backend> stats <id> --no-stream --format json`.
+/// This is an ENGINE call (podman/docker), not a distrobox subcommand.
+#[allow(dead_code)]
+pub fn build_stats_argv(id: &str) -> Vec<String> {
+    vec![
+        "stats".to_string(),
+        id.to_string(),
+        "--no-stream".to_string(),
+        "--format".to_string(),
+        "json".to_string(),
+    ]
+}
+
 // ─── P2 argv builders ────────────────────────────────────────────────────────
 
 /// Build the argv for a provision shell step:
