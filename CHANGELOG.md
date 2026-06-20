@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/Rynaro/cardboard-box/compare/v0.10.0...v0.11.0) (2026-06-20)
+
+
+### Features
+
+* **tui:** bundle 3 "glass cockpit" — live log streaming, scroll mouse, action history ([#34](https://github.com/Rynaro/cardboard-box/issues/34)) ([44a366f](https://github.com/Rynaro/cardboard-box/commit/44a366f373d014418b7053abbdccf9769db9fff8))
+
 ## [0.10.0](https://github.com/Rynaro/cardboard-box/compare/v0.9.0...v0.10.0) (2026-06-20)
 
 
