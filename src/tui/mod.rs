@@ -7,6 +7,12 @@
 // always present (the CLI entry point references them unconditionally).
 // keymap is ungated — pure data, consumed by cheatsheet overlay AND status bar.
 pub mod keymap;
+// action is ungated — pure enum; lean-clean (no ratatui, no Effect).
+pub mod action;
+// bulk is ungated — pure predicate helpers; lean-clean.
+pub mod bulk;
+// poll is ungated — pure gating helper; lean-clean.
+pub mod poll;
 // cmdlog is ungated — pure ring buffer; the LoggingRunner decorator inside it is tui-gated.
 #[cfg(feature = "tui")]
 pub mod app;

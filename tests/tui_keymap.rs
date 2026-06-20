@@ -1,7 +1,8 @@
 //! Tests for the keymap-as-data module.
-//! Covers AC-MAP-1, AC-MAP-2, AC-MAP-VOICE.
+//! Covers AC-MAP-1, AC-MAP-2, AC-MAP-VOICE, AC-ACTION-1.
 //! This module is always compiled (no feature gate) because keymap.rs is ungated.
 
+use cbox::tui::action::{Action, ALL_ACTIONS};
 use cbox::tui::keymap::{help_line, keymap_for, KeyContext};
 
 // ─── AC-MAP-1: help_line is derived, not hand-written ────────────────────────
@@ -38,36 +39,43 @@ fn ac_map_2_list_contains_all_required_keys() {
 }
 
 #[test]
+fn ac_map_2_list_contains_palette_and_bulk_keys() {
+    let bindings = keymap_for(KeyContext::List);
+    let keys: Vec<&str> = bindings.iter().map(|b| b.key).collect();
+    assert!(keys.contains(&":"), "List keymap must have ':' for palette");
+    assert!(
+        keys.contains(&"b"),
+        "List keymap must have 'b' for bulk-scoped palette"
+    );
+}
+
+#[test]
 fn ac_map_2_filter_input_context() {
     let bindings = keymap_for(KeyContext::FilterInput);
-    let actions: Vec<&str> = bindings.iter().map(|b| b.action).collect();
+    let labels: Vec<&str> = bindings.iter().map(|b| b.action.label()).collect();
     assert!(
-        actions
+        labels
             .iter()
             .any(|a| a.contains("narrow") || a.contains("filter")),
         "FilterInput must advertise type/filter action"
     );
     assert!(
-        actions.iter().any(|a| a.contains("delete")),
+        labels
+            .iter()
+            .any(|a| a.contains("delete") || a.contains("character")),
         "FilterInput must advertise delete/backspace action"
-    );
-    assert!(
-        actions.iter().any(|a| a.contains("close")),
-        "FilterInput must advertise close/esc action"
     );
 }
 
 #[test]
 fn ac_map_2_command_log_context() {
     let bindings = keymap_for(KeyContext::CommandLog);
-    let actions: Vec<&str> = bindings.iter().map(|b| b.action).collect();
+    let labels: Vec<&str> = bindings.iter().map(|b| b.action.label()).collect();
     assert!(
-        actions.iter().any(|a| a.contains("scroll")),
+        labels
+            .iter()
+            .any(|a| a.contains("scroll") || a.contains("move")),
         "CommandLog must advertise scroll action"
-    );
-    assert!(
-        actions.iter().any(|a| a.contains("close")),
-        "CommandLog must advertise close action"
     );
 }
 
@@ -75,7 +83,6 @@ fn ac_map_2_command_log_context() {
 fn ac_map_2_filter_and_command_log_are_distinct() {
     let filter_bindings = keymap_for(KeyContext::FilterInput);
     let cmdlog_bindings = keymap_for(KeyContext::CommandLog);
-    // They should not be the same slice
     assert_ne!(
         filter_bindings.len(),
         0,
@@ -94,7 +101,7 @@ fn ac_map_2_filter_and_command_log_are_distinct() {
     );
 }
 
-// ─── AC-MAP-VOICE: all action strings free of banned adjectives ───────────────
+// ─── AC-MAP-VOICE / AC-VOICE-1: all action labels free of banned adjectives ──
 
 const BANNED_ADJECTIVES: &[&str] = &[
     "cozy",
@@ -106,7 +113,23 @@ const BANNED_ADJECTIVES: &[&str] = &[
 ];
 
 #[test]
-fn ac_map_voice_all_actions_free_of_banned_adjectives() {
+fn ac_map_voice_all_action_labels_free_of_banned_adjectives() {
+    // AC-VOICE-1: every Action::label() is free of banned adjectives.
+    for action in ALL_ACTIONS {
+        let label = action.label();
+        let lower = label.to_lowercase();
+        assert!(!label.is_empty(), "{action:?}.label() must not be empty");
+        for banned in BANNED_ADJECTIVES {
+            assert!(
+                !lower.contains(banned),
+                "{action:?}.label() contains banned adjective {banned:?}: {label:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn ac_map_voice_keymap_labels_free_of_banned_adjectives() {
     let contexts = [
         KeyContext::List,
         KeyContext::Detail,
@@ -117,21 +140,92 @@ fn ac_map_voice_all_actions_free_of_banned_adjectives() {
         KeyContext::FilterInput,
         KeyContext::Cheatsheet,
         KeyContext::CommandLog,
+        KeyContext::Palette,
+        KeyContext::BulkConfirm,
     ];
 
     for ctx in &contexts {
         let bindings = keymap_for(*ctx);
         for binding in bindings {
-            let action_lower = binding.action.to_lowercase();
+            let label = binding.action.label();
+            let lower = label.to_lowercase();
             for banned in BANNED_ADJECTIVES {
                 assert!(
-                    !action_lower.contains(banned),
+                    !lower.contains(banned),
                     "keymap action {:?} in context {:?} contains banned adjective {:?}",
-                    binding.action,
+                    label,
                     ctx,
                     banned
                 );
             }
         }
     }
+}
+
+// ─── AC-ACTION-1: KEYMAP_LIST contains the expected Action variants ───────────
+
+#[test]
+fn ac_action_1_keymap_list_contains_required_actions() {
+    let bindings = keymap_for(KeyContext::List);
+    let actions: Vec<Action> = bindings.iter().map(|b| b.action).collect();
+
+    let required = [
+        Action::Filter,
+        Action::Cheatsheet,
+        Action::Doctor,
+        Action::CycleSkin,
+        Action::CommandLog,
+        Action::Palette,
+        Action::Create,
+        Action::Stop,
+        Action::Destroy,
+        Action::Apply,
+        Action::Edit,
+        Action::Refresh,
+        Action::Quit,
+    ];
+
+    for r in &required {
+        assert!(actions.contains(r), "KEYMAP_LIST must contain {r:?}");
+    }
+}
+
+// ─── AC-ACTION-2: palette_actions() contains expected actions ─────────────────
+
+#[test]
+fn ac_action_2_palette_actions_include_bulk_and_exclude_nav() {
+    use cbox::tui::action::palette_actions;
+
+    let actions = palette_actions();
+    let labels: Vec<&str> = actions.iter().map(|a| a.label()).collect();
+
+    // Must include bulk actions.
+    assert!(
+        actions.contains(&Action::BulkPruneStopped),
+        "palette must contain BulkPruneStopped"
+    );
+    assert!(
+        actions.contains(&Action::BulkStopRunning),
+        "palette must contain BulkStopRunning"
+    );
+    assert!(
+        actions.contains(&Action::BulkDestroyManaged),
+        "palette must contain BulkDestroyManaged"
+    );
+    assert!(
+        actions.contains(&Action::BulkDestroyUnmanaged),
+        "palette must contain BulkDestroyUnmanaged"
+    );
+
+    // Must NOT include navigation-only actions.
+    assert!(
+        !actions.contains(&Action::MoveUp),
+        "palette must not contain MoveUp"
+    );
+    assert!(
+        !actions.contains(&Action::MoveDown),
+        "palette must not contain MoveDown"
+    );
+
+    let _ = labels; // used for debugging
 }

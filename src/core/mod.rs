@@ -8,11 +8,13 @@ pub mod spec;
 pub mod state_store;
 
 use crate::boxfile;
+use std::time::Duration;
+
 use crate::dbox::{
     argv::{
         build_create_argv, build_dbox_list_argv, build_enter_argv, build_inspect_argv,
         build_list_argv, build_pkg_probe_argv, build_provision_shell_argv, build_rm_argv,
-        build_stop_argv,
+        build_stats_argv, build_stop_argv,
     },
     backend::Backend,
     runner::{DistroboxRunner, Invocation, RunMode},
@@ -22,8 +24,8 @@ use secret_inject::{build_env_keys, build_secret_specs, env_secret_fingerprint};
 use spec::{
     ApplyOutcome, ApplySpec, ApplySummary, BackendInfo, BackendStatus, BoxRow, CreateSpec,
     DiffResult, DistroboxInfo, DoctorResult, DoctorSpec, EditSpec, EnterSpec, InspectResult,
-    InspectSpec, KeyringStatus, MountResult, ProvisionStepResult, RmSpec, StopSpec, UpOutcome,
-    UpSpec,
+    InspectSpec, KeyringStatus, MountResult, ProvisionStepResult, RmSpec, StatsSample, StatsSpec,
+    StopSpec, UpOutcome, UpSpec,
 };
 use state_store::{ProvisionState, ProvisionStateStore};
 
@@ -134,6 +136,180 @@ pub fn list_all(
         boxes,
         raw_human: None,
     })
+}
+
+/// Internal: list a single backend using `run_with_timeout` on the runner.
+#[allow(dead_code)]
+fn list_machine_with_timeout(
+    backend: &Backend,
+    runner: &dyn DistroboxRunner,
+    timeout: Duration,
+) -> Result<ListOutcome, CboxError> {
+    let args = build_list_argv();
+    let inv = Invocation::new(backend.as_str(), args, RunMode::Capture);
+    let out = runner.run_with_timeout(inv, timeout)?;
+
+    if out.status != 0 {
+        return Err(CboxError::backend_error(out.status, &out.stderr, &out.argv));
+    }
+
+    let boxes = parse_backend_ps_json(&out.stdout, backend)?;
+    Ok(ListOutcome {
+        boxes,
+        raw_human: None,
+    })
+}
+
+/// List boxes across every given backend using `run_with_timeout`.
+/// Used by the silent poll effect (SilentLoadList) so a hung backend cannot
+/// freeze the TUI. The manual `r` refresh keeps calling `list_all` (no timeout).
+#[allow(dead_code)]
+pub fn list_all_with_timeout(
+    backends: &[Backend],
+    runner: &dyn DistroboxRunner,
+    timeout: Duration,
+) -> Result<ListOutcome, CboxError> {
+    let mut boxes = Vec::new();
+    let mut last_err = None;
+    for backend in backends {
+        match list_machine_with_timeout(backend, runner, timeout) {
+            Ok(outcome) => boxes.extend(outcome.boxes),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    if boxes.is_empty() {
+        if let Some(e) = last_err {
+            return Err(e);
+        }
+    }
+    Ok(ListOutcome {
+        boxes,
+        raw_human: None,
+    })
+}
+
+// ─── stats ───────────────────────────────────────────────────────────────────
+
+/// Fetch live CPU/mem stats for a running box via the engine's stats command.
+/// Uses `run_with_timeout` — a hung engine socket is bounded by `timeout`.
+/// Returns `Err` on engine error, non-zero exit, or parse failure; the caller
+/// swallows the error silently (no toast, no busy, no status change).
+#[allow(dead_code)]
+pub fn stats(
+    spec: &StatsSpec,
+    runner: &dyn DistroboxRunner,
+    timeout: Duration,
+) -> Result<StatsSample, CboxError> {
+    let args = build_stats_argv(&spec.id);
+    let inv = Invocation::new(spec.backend.as_str(), args, RunMode::Capture);
+    let out = runner.run_with_timeout(inv, timeout)?;
+
+    if out.status != 0 {
+        return Err(CboxError::backend_error(out.status, &out.stderr, &out.argv));
+    }
+
+    parse_stats_json(&out.stdout)
+}
+
+/// Parse `<backend> stats --no-stream --format json` output.
+///
+/// Both podman and docker support `--format json` but their schemas differ:
+/// - podman: array of objects with `CPU` (e.g. `"1.23%"`) and `MemUsage` ("12.3MB / 1.9GB")
+/// - docker: NDJSON / object with `CPUPerc` ("1.23%") and `MemUsage`
+///
+/// Empty / `null` / `[]` / malformed → `Err` (caller pushes nothing to history).
+#[allow(dead_code)]
+pub fn parse_stats_json(raw: &str) -> Result<StatsSample, CboxError> {
+    let raw = raw.trim();
+    if raw.is_empty() || raw == "null" || raw == "[]" {
+        return Err(CboxError::usage("no stats for box"));
+    }
+
+    // Try JSON array first (podman), then single object (docker), then NDJSON.
+    let item: serde_json::Value = {
+        match serde_json::from_str::<serde_json::Value>(raw) {
+            Ok(serde_json::Value::Array(arr)) if !arr.is_empty() => arr.into_iter().next().unwrap(),
+            Ok(serde_json::Value::Array(_)) => return Err(CboxError::usage("no stats for box")),
+            Ok(obj @ serde_json::Value::Object(_)) => obj,
+            Ok(_) => return Err(CboxError::usage("no stats for box")),
+            Err(_) => {
+                // Try NDJSON: take the first non-empty line.
+                let first = raw
+                    .lines()
+                    .map(|l| l.trim())
+                    .find(|l| !l.is_empty())
+                    .ok_or_else(|| CboxError::usage("no stats for box"))?;
+                serde_json::from_str::<serde_json::Value>(first)
+                    .map_err(|e| CboxError::ioerr(format!("Failed to parse stats JSON: {e}")))?
+            }
+        }
+    };
+
+    // CPU: try CPUPerc (docker), CPU (podman), cpu_percent.
+    let cpu_pct = ["CPUPerc", "CPU", "cpu_percent", "CpuPercent"]
+        .iter()
+        .find_map(|&k| item.get(k).and_then(|v| v.as_str()))
+        .map(|s| s.trim_end_matches('%').trim().parse::<f64>().unwrap_or(0.0))
+        .unwrap_or(0.0);
+
+    // Mem: try MemUsage (both) as "used / limit", or separate fields.
+    let (mem_used, mem_limit) = parse_mem_usage(&item);
+
+    Ok(StatsSample {
+        cpu_pct,
+        mem_used,
+        mem_limit,
+    })
+}
+
+/// Parse the memory usage from the stats item.
+/// Returns `(mem_used_bytes, mem_limit_bytes)`.
+#[allow(dead_code)]
+fn parse_mem_usage(item: &serde_json::Value) -> (u64, u64) {
+    // "MemUsage" string: e.g. "12.3MiB / 1.9GiB" or "240MB / 1.9GB"
+    if let Some(s) = item
+        .get("MemUsage")
+        .or_else(|| item.get("mem_usage"))
+        .and_then(|v| v.as_str())
+    {
+        if let Some((used_str, limit_str)) = s.split_once('/') {
+            let used = parse_human_size(used_str.trim()).unwrap_or(0);
+            let limit = parse_human_size(limit_str.trim()).unwrap_or(0);
+            return (used, limit);
+        }
+    }
+    // Numeric fallbacks
+    let used = item
+        .get("mem_usage")
+        .or_else(|| item.get("MemUsage"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let limit = item
+        .get("mem_limit")
+        .or_else(|| item.get("MemLimit"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    (used, limit)
+}
+
+/// Parse a human-readable size string like "12.3MiB", "240MB", "1.9GiB", "512KB".
+/// Returns bytes as `u64` on success, `None` on failure.
+#[allow(dead_code)]
+fn parse_human_size(s: &str) -> Option<u64> {
+    let s = s.trim();
+    // Split at the boundary between digits/dot and letters.
+    let split_pos = s.find(|c: char| c.is_alphabetic()).unwrap_or(s.len());
+    let (num_str, unit) = s.split_at(split_pos);
+    let num: f64 = num_str.trim().parse().ok()?;
+    let multiplier: u64 = match unit.trim().to_uppercase().as_str() {
+        "B" | "" => 1,
+        "KB" | "KIB" => 1024,
+        "MB" | "MIB" => 1024 * 1024,
+        "GB" | "GIB" => 1024 * 1024 * 1024,
+        "TB" | "TIB" => 1024u64 * 1024 * 1024 * 1024,
+        _ => return None,
+    };
+    Some((num * multiplier as f64) as u64)
 }
 
 /// Resolve which backend a named box lives on, so per-box operations route to

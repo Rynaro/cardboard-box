@@ -8,15 +8,20 @@
 //!  - Key handling is screen-dispatched: match `model.screen` first, then the key.
 //!  - Overlay pre-check runs BEFORE screen dispatch (§4.3 of the spec).
 
-use crate::core::spec::{ApplySpec, DoctorSpec, EnterSpec, InspectSpec, RmSpec, StopSpec};
+use crate::core::spec::{
+    ApplySpec, DoctorSpec, EnterSpec, InspectSpec, RmSpec, StatsSpec, StopSpec,
+};
 use crate::dbox::backend::Backend;
 use crate::error::CboxError;
+use crate::tui::action::{Action, BULK_ACTIONS};
+use crate::tui::bulk::{bulk_targets, is_running, BulkOp};
 use crate::tui::effect::Effect;
 use crate::tui::message::{Key, Message};
 use crate::tui::model::{
-    ConfirmState, FilterState, Model, Overlay, ProgressState, Screen, StatusLine, WizardState,
-    WizardStep,
+    BulkConfirmState, ConfirmState, FilterState, Model, Overlay, ProgressState, Screen,
+    StatsHistory, StatusLine, WizardState, WizardStep,
 };
+use crate::tui::poll::{should_poll, PollGate, PollKind};
 use crate::tui::strings;
 
 #[cfg(feature = "tui")]
@@ -31,7 +36,7 @@ fn backend_of(row_backend: &str, fallback: &Backend) -> Backend {
 /// The pure reducer. Returns a list of effects for the shell to execute.
 pub fn update(model: &mut Model, msg: Message) -> Vec<Effect> {
     match msg {
-        // ── Tick: advance spinner, expire toasts ──────────────────────────────
+        // ── Tick: advance spinner, expire toasts, maybe fire silent poll ─────
         Message::Tick => {
             model.spinner_tick = model.spinner_tick.wrapping_add(1);
             if let Some(ref mut p) = model.progress {
@@ -42,6 +47,17 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Effect> {
             model
                 .toasts
                 .retain(|t| now.wrapping_sub(t.born_tick) < t.ttl_ticks);
+
+            // Silent-poll decision (GAP-1 gate).
+            let gate = build_poll_gate(model);
+            if let Some(kind) = should_poll(&gate) {
+                model.last_poll_tick = model.spinner_tick;
+                model.poll_in_flight = true;
+                // NEVER sets model.busy — that would block all keys.
+                let eff = poll_kind_to_effect(kind);
+                return vec![eff];
+            }
+
             vec![]
         }
 
@@ -62,6 +78,9 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Effect> {
         Message::DoctorDone(result) => handle_doctor_done(model, result),
         Message::EnterReturned(result) => handle_enter_returned(model, result),
         Message::EditReturned(result) => handle_edit_returned(model, result),
+        // ── Bundle 2: silent poll completions ─────────────────────────────────
+        Message::SilentListLoaded(result) => handle_silent_list_loaded(model, result),
+        Message::StatsLoaded(result) => handle_stats_loaded(model, result),
     }
 }
 
@@ -79,7 +98,12 @@ fn handle_key(model: &mut Model, key: Key) -> Vec<Effect> {
         return vec![];
     }
 
-    // 3. If the filter overlay is open, intercept ALL keys for filter input.
+    // 3a. If the bulk-confirm modal is open, intercept ALL keys for it.
+    if model.bulk_confirm.is_some() {
+        return handle_key_bulk_confirm(model, key);
+    }
+
+    // 3b. If the filter overlay is open, intercept ALL keys for filter input.
     if model.filter.is_some() {
         return handle_key_filter(model, key);
     }
@@ -97,9 +121,20 @@ fn handle_key(model: &mut Model, key: Key) -> Vec<Effect> {
             let scroll = *scroll;
             return handle_key_cmdlog(model, key, scroll);
         }
+        Overlay::Palette {
+            cursor,
+            matches,
+            bulk_only,
+            ..
+        } => {
+            let cursor = *cursor;
+            let matches = matches.clone();
+            let bulk_only = *bulk_only;
+            return handle_key_palette(model, key, cursor, matches, bulk_only);
+        }
     }
 
-    // 5. Global keys (available on every non-busy screen): skin cycle, cheatsheet.
+    // 5. Global keys (available on every non-busy screen): skin cycle, cheatsheet, palette.
     match key {
         Key::Char('t') => {
             let next = model.skin.next();
@@ -111,6 +146,9 @@ fn handle_key(model: &mut Model, key: Key) -> Vec<Effect> {
         Key::Char('?') => {
             model.overlay = Overlay::Cheatsheet;
             return vec![];
+        }
+        Key::Char(':') => {
+            return dispatch_action(model, Action::Palette);
         }
         _ => {}
     }
@@ -260,138 +298,38 @@ fn handle_key_list(model: &mut Model, key: Key) -> Vec<Effect> {
             model.move_down();
             vec![]
         }
-        Key::Enter => {
-            if let Some(row) = model.selected_box().cloned() {
-                let is_running = row.status.to_lowercase().contains("running")
-                    || row.status.to_lowercase().contains("up");
-                if is_running {
-                    let spec = EnterSpec {
-                        name: row.name.clone(),
-                        root: false,
-                        clean_path: false,
-                        cmd: vec![],
-                        backend: backend_of(&row.backend, &model.backend),
-                    };
-                    vec![Effect::SuspendAndEnter(spec)]
-                } else {
-                    // stopped → inspect/detail
-                    let spec = InspectSpec {
-                        name: row.name.clone(),
-                        raw: false,
-                        backend: backend_of(&row.backend, &model.backend),
-                    };
-                    model.screen = Screen::Detail;
-                    model.busy = true;
-                    model.status = StatusLine::Busy("Loading detail…".to_string());
-                    vec![Effect::LoadDetail(spec)]
-                }
-            } else {
-                vec![]
-            }
-        }
-        Key::Char('i') => {
-            if let Some(row) = model.selected_box().cloned() {
-                let spec = InspectSpec {
-                    name: row.name.clone(),
-                    raw: false,
-                    backend: backend_of(&row.backend, &model.backend),
-                };
-                model.screen = Screen::Detail;
-                model.busy = true;
-                model.status = StatusLine::Busy("Loading detail…".to_string());
-                vec![Effect::LoadDetail(spec)]
-            } else {
-                vec![]
-            }
-        }
+        Key::Enter => open_selected(model),
+        Key::Char('i') => inspect_selected(model),
         Key::Char('c') => {
             model.screen = Screen::Wizard;
             model.wizard = Some(WizardState::new());
             vec![]
         }
-        Key::Char('d') => {
-            if let Some(row) = model.selected_box().cloned() {
-                model.screen = Screen::ConfirmDestroy;
-                model.confirm = Some(ConfirmState {
-                    name: row.name.clone(),
-                    rm_home: false,
-                    backend: backend_of(&row.backend, &model.backend),
-                });
-            }
-            vec![]
-        }
-        Key::Char('s') => {
-            if let Some(row) = model.selected_box().cloned() {
-                let spec = StopSpec {
-                    names: vec![row.name.clone()],
-                    all: false,
-                    backend: backend_of(&row.backend, &model.backend),
-                };
-                model.busy = true;
-                model.status = StatusLine::Busy(format!("Stopping \"{}\"…", row.name));
-                vec![Effect::Stop(spec)]
-            } else {
-                vec![]
-            }
-        }
-        Key::Char('a') => {
-            if let Some(row) = model.selected_box().cloned() {
-                let backend = backend_of(&row.backend, &model.backend);
-                start_apply(model, &row.name, false, backend)
-            } else {
-                vec![]
-            }
-        }
+        Key::Char('d') => confirm_destroy_selected(model),
+        Key::Char('s') => stop_selected(model),
+        Key::Char('a') => apply_selected(model),
         Key::Char('u') => {
             // Up is not fully wired in v3.0 list screen (needs boxfile path).
             // Treat as apply for now.
-            if let Some(row) = model.selected_box().cloned() {
-                let backend = backend_of(&row.backend, &model.backend);
-                start_apply(model, &row.name, false, backend)
-            } else {
-                vec![]
-            }
+            apply_selected(model)
         }
-        Key::Char('e') => {
-            if let Some(row) = model.selected_box().cloned() {
-                start_edit(model, &row.name)
-            } else {
-                vec![]
-            }
-        }
-        Key::Char('r') => {
-            model.busy = true;
-            model.status = StatusLine::Busy("Refreshing…".to_string());
-            vec![Effect::LoadList]
-        }
+        Key::Char('e') => edit_selected(model),
+        Key::Char('r') => start_manual_refresh(model),
         // Doctor moved from `?` to uppercase `D` (AC-REBIND-1).
-        Key::Char('D') => {
-            model.screen = Screen::DoctorPanel;
-            model.busy = true;
-            model.status = StatusLine::Busy("Running doctor…".to_string());
-            vec![Effect::Doctor(DoctorSpec {
-                backend_override: None,
-            })]
-        }
+        Key::Char('D') => start_doctor(model),
         // `/` opens the fuzzy filter overlay.
         Key::Char('/') => {
-            // Close any existing overlay when opening filter.
-            model.overlay = Overlay::None;
-            let names: Vec<&str> = model.boxes.iter().map(|b| b.name.as_str()).collect();
-            let all_indices: Vec<usize> = (0..names.len()).collect();
-            model.filter = Some(FilterState {
-                query: String::new(),
-                matches: all_indices,
-                cursor: model
-                    .selected
-                    .unwrap_or(0)
-                    .min(model.boxes.len().saturating_sub(1)),
-            });
+            open_filter(model);
             vec![]
         }
         // `l` opens the command-log overlay.
         Key::Char('l') => {
             model.overlay = Overlay::CommandLog { scroll: 0 };
+            vec![]
+        }
+        // `b` opens the palette scoped to bulk actions only (fast-path for bulk ops).
+        Key::Char('b') => {
+            open_palette(model, true);
             vec![]
         }
         Key::Char('q') | Key::Esc => {
@@ -410,6 +348,8 @@ fn handle_key_detail(model: &mut Model, key: Key) -> Vec<Effect> {
             // Esc from Detail goes back to List (never quits the app).
             model.screen = Screen::List;
             model.detail = None;
+            // Reset stats history when leaving Detail (AC-HIST-2).
+            model.stats_history = None;
             vec![]
         }
         Key::Char('e') => {
@@ -430,9 +370,7 @@ fn handle_key_detail(model: &mut Model, key: Key) -> Vec<Effect> {
         }
         Key::Enter => {
             if let Some(ref detail) = model.detail.clone() {
-                let is_running = detail.status.to_lowercase().contains("running")
-                    || detail.status.to_lowercase().contains("up");
-                if is_running {
+                if is_running(&detail.status) {
                     let spec = EnterSpec {
                         name: detail.name.clone(),
                         root: false,
@@ -779,6 +717,581 @@ fn handle_key_doctor(model: &mut Model, key: Key) -> Vec<Effect> {
     }
 }
 
+// ─── Bundle 2: dispatch_action (single reducer dispatch) ─────────────────────
+
+/// Map an `Action` to its effects and model mutations.
+///
+/// Both the key path (`handle_key_list` arms) and the palette (Enter over a command)
+/// route through this function — no behavior duplication (R-2).
+pub fn dispatch_action(model: &mut Model, action: Action) -> Vec<Effect> {
+    match action {
+        Action::Filter => {
+            open_filter(model);
+            vec![]
+        }
+        Action::Cheatsheet => {
+            model.overlay = Overlay::Cheatsheet;
+            vec![]
+        }
+        Action::CommandLog => {
+            model.overlay = Overlay::CommandLog { scroll: 0 };
+            vec![]
+        }
+        Action::CycleSkin => {
+            let next = model.skin.next();
+            model.skin = next;
+            let name = format!("Skin: {}", next.name());
+            model.push_toast(crate::tui::model::ToastKind::Info, name);
+            vec![]
+        }
+        Action::Doctor => start_doctor(model),
+        Action::Refresh => start_manual_refresh(model),
+        Action::Create => {
+            model.screen = Screen::Wizard;
+            model.wizard = Some(WizardState::new());
+            vec![]
+        }
+        Action::Stop => stop_selected(model),
+        Action::Destroy => confirm_destroy_selected(model),
+        Action::Apply => apply_selected(model),
+        Action::Edit => edit_selected(model),
+        Action::Inspect => inspect_selected(model),
+        Action::Open => open_selected(model),
+        Action::MoveUp => {
+            model.move_up();
+            vec![]
+        }
+        Action::MoveDown => {
+            model.move_down();
+            vec![]
+        }
+        Action::Palette => {
+            open_palette(model, false);
+            vec![]
+        }
+        Action::Quit => {
+            model.should_quit = true;
+            vec![Effect::Quit]
+        }
+        // DeleteChar is handled inline in text-input contexts (filter / palette / wizard).
+        // Dispatching it globally is a no-op.
+        Action::DeleteChar => vec![],
+        // Bulk: open bulk-confirm modal pre-loaded with the filtered target set.
+        Action::BulkPruneStopped => open_bulk_confirm(model, BulkOp::PruneStopped),
+        Action::BulkStopRunning => open_bulk_confirm(model, BulkOp::StopRunning),
+        Action::BulkDestroyManaged => open_bulk_confirm(model, BulkOp::DestroyManaged),
+        Action::BulkDestroyUnmanaged => open_bulk_confirm(model, BulkOp::DestroyUnmanaged),
+    }
+}
+
+// ─── Bundle 2: single-box action helpers (extracted so key path + palette agree) ──
+
+fn open_filter(model: &mut Model) {
+    model.overlay = Overlay::None;
+    let names: Vec<&str> = model.boxes.iter().map(|b| b.name.as_str()).collect();
+    let all_indices: Vec<usize> = (0..names.len()).collect();
+    model.filter = Some(FilterState {
+        query: String::new(),
+        matches: all_indices,
+        cursor: model
+            .selected
+            .unwrap_or(0)
+            .min(model.boxes.len().saturating_sub(1)),
+    });
+}
+
+fn start_doctor(model: &mut Model) -> Vec<Effect> {
+    model.screen = Screen::DoctorPanel;
+    model.busy = true;
+    model.status = StatusLine::Busy("Running doctor…".to_string());
+    vec![Effect::Doctor(DoctorSpec {
+        backend_override: None,
+    })]
+}
+
+fn start_manual_refresh(model: &mut Model) -> Vec<Effect> {
+    model.busy = true;
+    model.status = StatusLine::Busy("Refreshing…".to_string());
+    vec![Effect::LoadList]
+}
+
+fn stop_selected(model: &mut Model) -> Vec<Effect> {
+    if let Some(row) = model.selected_box().cloned() {
+        let spec = StopSpec {
+            names: vec![row.name.clone()],
+            all: false,
+            backend: backend_of(&row.backend, &model.backend),
+        };
+        model.busy = true;
+        model.status = StatusLine::Busy(format!("Stopping \"{}\"…", row.name));
+        vec![Effect::Stop(spec)]
+    } else {
+        vec![]
+    }
+}
+
+fn confirm_destroy_selected(model: &mut Model) -> Vec<Effect> {
+    if let Some(row) = model.selected_box().cloned() {
+        model.screen = Screen::ConfirmDestroy;
+        model.confirm = Some(ConfirmState {
+            name: row.name.clone(),
+            rm_home: false,
+            backend: backend_of(&row.backend, &model.backend),
+        });
+    }
+    vec![]
+}
+
+fn apply_selected(model: &mut Model) -> Vec<Effect> {
+    if let Some(row) = model.selected_box().cloned() {
+        let backend = backend_of(&row.backend, &model.backend);
+        start_apply(model, &row.name, false, backend)
+    } else {
+        vec![]
+    }
+}
+
+fn edit_selected(model: &mut Model) -> Vec<Effect> {
+    if let Some(row) = model.selected_box().cloned() {
+        start_edit(model, &row.name)
+    } else {
+        vec![]
+    }
+}
+
+fn inspect_selected(model: &mut Model) -> Vec<Effect> {
+    if let Some(row) = model.selected_box().cloned() {
+        let spec = InspectSpec {
+            name: row.name.clone(),
+            raw: false,
+            backend: backend_of(&row.backend, &model.backend),
+        };
+        model.screen = Screen::Detail;
+        model.busy = true;
+        model.status = StatusLine::Busy("Loading detail…".to_string());
+        vec![Effect::LoadDetail(spec)]
+    } else {
+        vec![]
+    }
+}
+
+fn open_selected(model: &mut Model) -> Vec<Effect> {
+    if let Some(row) = model.selected_box().cloned() {
+        let row_is_running = is_running(&row.status);
+        if row_is_running {
+            let spec = EnterSpec {
+                name: row.name.clone(),
+                root: false,
+                clean_path: false,
+                cmd: vec![],
+                backend: backend_of(&row.backend, &model.backend),
+            };
+            vec![Effect::SuspendAndEnter(spec)]
+        } else {
+            inspect_selected(model)
+        }
+    } else {
+        vec![]
+    }
+}
+
+// ─── Bundle 2: palette ────────────────────────────────────────────────────────
+
+/// Open the command palette.
+///
+/// `bulk_only`: when `true`, restricts the palette source to the four bulk actions
+/// (fast-path opened via `b`).
+fn open_palette(model: &mut Model, bulk_only: bool) {
+    model.filter = None; // close filter if open
+    let source = if bulk_only {
+        crate::tui::action::BULK_ACTIONS
+    } else {
+        crate::tui::action::palette_actions()
+    };
+    let n = source.len();
+    model.overlay = Overlay::Palette {
+        query: String::new(),
+        matches: (0..n).collect(),
+        cursor: 0,
+        bulk_only,
+    };
+}
+
+fn handle_key_palette(
+    model: &mut Model,
+    key: Key,
+    cursor: usize,
+    matches: Vec<usize>,
+    bulk_only: bool,
+) -> Vec<Effect> {
+    match key {
+        Key::Esc => {
+            model.overlay = Overlay::None;
+            vec![]
+        }
+        Key::Enter => {
+            // Dispatch the selected action.
+            let source = palette_source(bulk_only);
+            if let Some(&action_idx) = matches.get(cursor) {
+                if let Some(&action) = source.get(action_idx) {
+                    model.overlay = Overlay::None;
+                    return dispatch_action(model, action);
+                }
+            }
+            vec![]
+        }
+        Key::Up => {
+            let new_cursor = cursor.saturating_sub(1);
+            if let Overlay::Palette {
+                cursor: ref mut c, ..
+            } = model.overlay
+            {
+                *c = new_cursor;
+            }
+            vec![]
+        }
+        Key::Down => {
+            let max = matches.len().saturating_sub(1);
+            let new_cursor = (cursor + 1).min(max);
+            if let Overlay::Palette {
+                cursor: ref mut c, ..
+            } = model.overlay
+            {
+                *c = new_cursor;
+            }
+            vec![]
+        }
+        Key::Backspace => {
+            if let Overlay::Palette {
+                ref mut query,
+                ref mut matches,
+                ref mut cursor,
+                bulk_only,
+            } = model.overlay
+            {
+                query.pop();
+                let q = query.clone();
+                let source = palette_source(bulk_only);
+                let labels: Vec<&str> = source.iter().map(|a| a.label()).collect();
+                *matches = palette_rank(&q, &labels);
+                *cursor = 0;
+            }
+            vec![]
+        }
+        Key::Char(c) => {
+            // In palette, ALL chars (including j/k) feed the query (consistent with filter).
+            if let Overlay::Palette {
+                ref mut query,
+                ref mut matches,
+                ref mut cursor,
+                bulk_only,
+            } = model.overlay
+            {
+                query.push(c);
+                let q = query.clone();
+                let source = palette_source(bulk_only);
+                let labels: Vec<&str> = source.iter().map(|a| a.label()).collect();
+                *matches = palette_rank(&q, &labels);
+                *cursor = 0;
+            }
+            vec![]
+        }
+        _ => vec![],
+    }
+}
+
+fn palette_source(bulk_only: bool) -> &'static [Action] {
+    if bulk_only {
+        BULK_ACTIONS
+    } else {
+        crate::tui::action::palette_actions()
+    }
+}
+
+/// Rank palette entries by query using fuzzy_rank when tui is enabled, or
+/// a simple substring fallback for lean builds.
+fn palette_rank(query: &str, labels: &[&str]) -> Vec<usize> {
+    #[cfg(feature = "tui")]
+    {
+        fuzzy_rank(query, labels)
+    }
+    #[cfg(not(feature = "tui"))]
+    {
+        if query.trim().is_empty() {
+            return (0..labels.len()).collect();
+        }
+        labels
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.to_lowercase().contains(&query.to_lowercase()))
+            .map(|(i, _)| i)
+            .collect()
+    }
+}
+
+// ─── Bundle 2: bulk confirm ───────────────────────────────────────────────────
+
+/// Open the bulk-confirm modal for the given op.
+///
+/// Computes the target set from `model.boxes`. If empty, pushes an info toast
+/// and does NOT open the modal (AC-BULK-EMPTY).
+fn open_bulk_confirm(model: &mut Model, op: BulkOp) -> Vec<Effect> {
+    let indices = bulk_targets(op, &model.boxes);
+    if indices.is_empty() {
+        model.push_toast(
+            crate::tui::model::ToastKind::Info,
+            strings::BULK_EMPTY.to_string(),
+        );
+        return vec![];
+    }
+
+    let targets: Vec<String> = indices
+        .iter()
+        .map(|&i| model.boxes[i].name.clone())
+        .collect();
+    let target_backends: Vec<String> = indices
+        .iter()
+        .map(|&i| model.boxes[i].backend.clone())
+        .collect();
+
+    // Close palette if open.
+    model.overlay = Overlay::None;
+
+    model.bulk_confirm = Some(BulkConfirmState {
+        op,
+        targets,
+        target_backends,
+        typed_confirm: String::new(),
+    });
+    vec![]
+}
+
+/// Key handler for the bulk-confirm modal.
+///
+/// For the dangerous op (`DestroyUnmanaged`): ALL chars feed `typed_confirm`;
+/// Enter executes ONLY if `typed_confirm == BULK_UNMANAGED_PHRASE`.
+/// For non-dangerous ops: y/Enter confirms; n/Esc cancels.
+fn handle_key_bulk_confirm(model: &mut Model, key: Key) -> Vec<Effect> {
+    let op = match model.bulk_confirm.as_ref().map(|b| b.op) {
+        Some(op) => op,
+        None => return vec![],
+    };
+
+    if op == BulkOp::DestroyUnmanaged {
+        // DANGEROUS path: typed phrase required.
+        match key {
+            Key::Esc | Key::Char('n') => {
+                model.bulk_confirm = None;
+                vec![]
+            }
+            Key::Backspace => {
+                if let Some(ref mut b) = model.bulk_confirm {
+                    b.typed_confirm.pop();
+                }
+                vec![]
+            }
+            Key::Enter => {
+                let confirmed = model
+                    .bulk_confirm
+                    .as_ref()
+                    .map(|b| b.typed_confirm == strings::BULK_UNMANAGED_PHRASE)
+                    .unwrap_or(false);
+                if confirmed {
+                    execute_bulk_confirm(model)
+                } else {
+                    // Wrong phrase — stay in modal.
+                    vec![]
+                }
+            }
+            Key::Char(c) => {
+                // Single char only appends — never destroys on its own (AC-BULK-DANGER-2).
+                if let Some(ref mut b) = model.bulk_confirm {
+                    b.typed_confirm.push(c);
+                }
+                vec![]
+            }
+            _ => vec![],
+        }
+    } else {
+        // Non-dangerous: y/enter confirms; n/esc cancels.
+        match key {
+            Key::Char('y') | Key::Enter => execute_bulk_confirm(model),
+            Key::Char('n') | Key::Esc => {
+                model.bulk_confirm = None;
+                vec![]
+            }
+            _ => vec![],
+        }
+    }
+}
+
+/// Fan-out confirmed bulk op — builds one Effect::Rm/Stop per backend group.
+fn execute_bulk_confirm(model: &mut Model) -> Vec<Effect> {
+    let bulk = match model.bulk_confirm.take() {
+        Some(b) => b,
+        None => return vec![],
+    };
+
+    // Group targets by backend (≤ 2 groups — podman + docker, under 4-deep channel).
+    let mut by_backend: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for (name, backend_str) in bulk.targets.iter().zip(bulk.target_backends.iter()) {
+        by_backend
+            .entry(backend_str.clone())
+            .or_default()
+            .push(name.clone());
+    }
+
+    let n = bulk.targets.len();
+    let op = bulk.op;
+
+    let busy_msg = match op {
+        BulkOp::PruneStopped => format!("Pruning {n} stopped boxes…"),
+        BulkOp::StopRunning => format!("Stopping {n} running boxes…"),
+        BulkOp::DestroyManaged => format!("Destroying {n} cbox-managed boxes…"),
+        BulkOp::DestroyUnmanaged => format!("Destroying {n} NON-managed boxes…"),
+    };
+    let title = match op {
+        BulkOp::PruneStopped => format!("Pruning {n} boxes"),
+        BulkOp::StopRunning => format!("Stopping {n} boxes"),
+        BulkOp::DestroyManaged => format!("Destroying {n} boxes"),
+        BulkOp::DestroyUnmanaged => format!("Destroying {n} NON-managed boxes"),
+    };
+
+    model.screen = Screen::Progress;
+    model.busy = true;
+    model.status = StatusLine::Busy(busy_msg);
+    model.progress = Some(ProgressState {
+        title,
+        steps: vec![],
+        spinner_tick: 0,
+        recreate_needed: false,
+        recreate_msg: None,
+        recreate_confirm: false,
+        pending_spec: None,
+    });
+
+    let mut effects = Vec::new();
+    for (backend_str, names) in by_backend {
+        let backend = Backend::from_name(&backend_str).unwrap_or_else(|| model.backend.clone());
+        match op {
+            BulkOp::PruneStopped | BulkOp::DestroyManaged | BulkOp::DestroyUnmanaged => {
+                effects.push(Effect::Rm(RmSpec {
+                    names,
+                    force: true,
+                    rm_home: false,
+                    all: false,
+                    yes: true,
+                    backend,
+                }));
+            }
+            BulkOp::StopRunning => {
+                effects.push(Effect::Stop(StopSpec {
+                    names,
+                    all: false,
+                    backend,
+                }));
+            }
+        }
+    }
+
+    effects
+}
+
+// ─── Bundle 2: poll helpers ───────────────────────────────────────────────────
+
+/// Build the `PollGate` view from the current model state.
+fn build_poll_gate(model: &Model) -> PollGate {
+    // Determine if we're on Detail with a running box.
+    let detail_running = if model.screen == Screen::Detail {
+        model.detail.as_ref().and_then(|d| {
+            if is_running(&d.status) {
+                Some((d.id.clone(), d.backend.clone()))
+            } else {
+                None
+            }
+        })
+    } else {
+        None
+    };
+
+    PollGate {
+        spinner_tick: model.spinner_tick,
+        last_poll_tick: model.last_poll_tick,
+        busy: model.busy,
+        poll_in_flight: model.poll_in_flight,
+        detail_running,
+    }
+}
+
+/// Map a `PollKind` to the concrete `Effect` to dispatch.
+fn poll_kind_to_effect(kind: PollKind) -> Effect {
+    match kind {
+        PollKind::List => Effect::SilentLoadList,
+        PollKind::Stats { id, backend } => {
+            let b = Backend::from_name(&backend).unwrap_or(Backend::Podman);
+            Effect::StatsPoll(StatsSpec { id, backend: b })
+        }
+    }
+}
+
+// ─── Bundle 2: silent poll completion handlers ────────────────────────────────
+
+fn handle_silent_list_loaded(
+    model: &mut Model,
+    result: Result<Vec<crate::core::spec::BoxRow>, CboxError>,
+) -> Vec<Effect> {
+    // Always clear the in-flight guard (AC-POLL-4).
+    model.poll_in_flight = false;
+    match result {
+        Ok(rows) => {
+            model.boxes = rows;
+            // Clamp selection — mirror handle_list_loaded (AC-POLL-5).
+            if let Some(i) = model.selected {
+                if i >= model.boxes.len() {
+                    model.selected = if model.boxes.is_empty() {
+                        None
+                    } else {
+                        Some(model.boxes.len() - 1)
+                    };
+                }
+            }
+            if model.selected.is_none() && !model.boxes.is_empty() {
+                model.selected = Some(0);
+            }
+            // Recompute filter if open (AC-POLL-5).
+            if model.filter.is_some() {
+                let query = model.filter.as_ref().unwrap().query.clone();
+                recompute_filter(model, &query);
+            }
+            // NEVER set model.status, NEVER set model.busy, NEVER push a toast (AC-POLL-4).
+        }
+        Err(_) => {
+            // Swallow silently — a transient refresh failure is invisible.
+            // Next poll will retry.
+        }
+    }
+    vec![]
+}
+
+fn handle_stats_loaded(
+    model: &mut Model,
+    result: Result<crate::core::spec::StatsSample, CboxError>,
+) -> Vec<Effect> {
+    // Always clear the in-flight guard.
+    model.poll_in_flight = false;
+    if let Ok(sample) = result {
+        // Push into the bounded history buffer.
+        if let Some(ref mut history) = model.stats_history {
+            history.push_sample(&sample);
+        }
+        // If history hasn't been initialized yet (shouldn't happen), initialize it now.
+        // (detail sets it in handle_detail_loaded; this is a safety net.)
+    }
+    // On Err: push nothing — history goes stale → renders gracefully (AC-STATS-PARSE-3).
+    vec![]
+}
+
 // ─── Helper: start apply ─────────────────────────────────────────────────────
 
 fn start_apply(model: &mut Model, name: &str, recreate: bool, backend: Backend) -> Vec<Effect> {
@@ -883,12 +1396,31 @@ fn handle_detail_loaded(
         Ok(detail) => {
             let msg = format!("Inspected \"{}\"", detail.name);
             model.set_status_ok(msg);
+
+            // Initialize stats history for RUNNING boxes (AC-HIST-2, AC-STATS-STOPPED).
+            // Stopped boxes get no history — should_poll won't fire StatsPoll for them.
+            let running = is_running(&detail.status);
+            if running {
+                // Reset to a fresh buffer if we're looking at a different box.
+                let needs_reset = model
+                    .stats_history
+                    .as_ref()
+                    .map(|h| h.box_id != detail.id)
+                    .unwrap_or(true);
+                if needs_reset {
+                    model.stats_history = Some(StatsHistory::new(detail.id.clone()));
+                }
+            } else {
+                model.stats_history = None;
+            }
+
             model.detail = Some(detail);
             vec![]
         }
         Err(e) => {
             model.set_status_error(e.to_string());
             model.screen = Screen::List;
+            model.stats_history = None;
             vec![]
         }
     }

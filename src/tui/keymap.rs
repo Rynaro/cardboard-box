@@ -5,9 +5,11 @@
 //!  - The lean (`make lint-lean`) build can lint it.
 //!  - The cheatsheet overlay and the status bar both derive from ONE table.
 //!
-//! Voice rule: action strings use verbs only — no banned adjectives.
-//! AC-MAP-VOICE asserts this across every KeyBinding.action.
+//! Voice rule: action labels use verbs only — no banned adjectives.
+//! AC-ACTION-1 + AC-VOICE-1 assert this across every `Action::label()`.
 #![allow(dead_code)]
+
+use crate::tui::action::Action;
 
 // ─── KeyBinding ───────────────────────────────────────────────────────────────
 
@@ -15,8 +17,8 @@
 pub struct KeyBinding {
     /// Display form of the key, e.g. `"?"`, `"enter"`, `"↑↓"`.
     pub key: &'static str,
-    /// Verb phrase describing what it does, e.g. `"cheatsheet"`, `"open"`, `"move"`.
-    pub action: &'static str,
+    /// The action this key performs — single source of truth.
+    pub action: Action,
 }
 
 // ─── KeyContext ───────────────────────────────────────────────────────────────
@@ -37,6 +39,10 @@ pub enum KeyContext {
     Cheatsheet,
     /// Command-log overlay: scroll with arrows/j/k, esc/q/l closes.
     CommandLog,
+    /// Palette overlay: type query, arrows navigate matches, enter dispatches.
+    Palette,
+    /// Bulk-confirm modal: type phrase or y/n/esc.
+    BulkConfirm,
 }
 
 // ─── Keymap tables ────────────────────────────────────────────────────────────
@@ -44,175 +50,213 @@ pub enum KeyContext {
 static KEYMAP_LIST: &[KeyBinding] = &[
     KeyBinding {
         key: "↑↓ / j k",
-        action: "move",
+        action: Action::MoveUp,
     },
     KeyBinding {
         key: "enter",
-        action: "open",
+        action: Action::Open,
     },
     KeyBinding {
         key: "i",
-        action: "inspect",
+        action: Action::Inspect,
     },
     KeyBinding {
         key: "c",
-        action: "pack (create)",
+        action: Action::Create,
     },
     KeyBinding {
         key: "s",
-        action: "seal (stop)",
+        action: Action::Stop,
     },
     KeyBinding {
         key: "d",
-        action: "clear out (destroy)",
+        action: Action::Destroy,
     },
     KeyBinding {
         key: "a",
-        action: "apply",
+        action: Action::Apply,
     },
     KeyBinding {
         key: "e",
-        action: "edit",
+        action: Action::Edit,
     },
     KeyBinding {
         key: "r",
-        action: "refresh",
+        action: Action::Refresh,
     },
     KeyBinding {
         key: "/",
-        action: "filter",
+        action: Action::Filter,
     },
     KeyBinding {
         key: "?",
-        action: "cheatsheet",
+        action: Action::Cheatsheet,
     },
     KeyBinding {
         key: "D",
-        action: "doctor",
+        action: Action::Doctor,
     },
     KeyBinding {
         key: "t",
-        action: "skin",
+        action: Action::CycleSkin,
     },
     KeyBinding {
         key: "l",
-        action: "command-log",
+        action: Action::CommandLog,
+    },
+    KeyBinding {
+        key: ":",
+        action: Action::Palette,
+    },
+    KeyBinding {
+        key: "b",
+        action: Action::Palette, // bulk-scoped fast-path (opens Palette with bulk_only=true)
     },
     KeyBinding {
         key: "q / esc",
-        action: "quit",
+        action: Action::Quit,
     },
 ];
 
 static KEYMAP_DETAIL: &[KeyBinding] = &[
     KeyBinding {
         key: "esc / q",
-        action: "back",
+        action: Action::Quit, // goes back on Detail
     },
     KeyBinding {
         key: "e",
-        action: "edit",
+        action: Action::Edit,
     },
     KeyBinding {
         key: "a",
-        action: "apply",
+        action: Action::Apply,
     },
     KeyBinding {
         key: "enter",
-        action: "open (if running)",
+        action: Action::Open,
     },
     KeyBinding {
         key: "?",
-        action: "cheatsheet",
+        action: Action::Cheatsheet,
     },
     KeyBinding {
         key: "t",
-        action: "skin",
+        action: Action::CycleSkin,
     },
 ];
 
 static KEYMAP_WIZARD: &[KeyBinding] = &[
     KeyBinding {
         key: "tab / enter",
-        action: "next step",
+        action: Action::Open, // next step
     },
     KeyBinding {
         key: "shift-tab",
-        action: "back",
+        action: Action::MoveUp, // back
     },
     KeyBinding {
         key: "esc",
-        action: "cancel",
+        action: Action::Quit, // cancel
     },
 ];
 
 static KEYMAP_CONFIRM_DESTROY: &[KeyBinding] = &[
     KeyBinding {
         key: "y / enter",
-        action: "confirm destroy",
+        action: Action::Destroy,
     },
     KeyBinding {
         key: "n / esc",
-        action: "cancel",
+        action: Action::Quit,
     },
     KeyBinding {
         key: "h",
-        action: "toggle remove home",
+        action: Action::Apply, // toggle remove home
     },
 ];
 
 static KEYMAP_PROGRESS: &[KeyBinding] = &[KeyBinding {
     key: "enter / esc / q",
-    action: "back (when done)",
+    action: Action::Open, // back (when done)
 }];
 
 static KEYMAP_DOCTOR_PANEL: &[KeyBinding] = &[KeyBinding {
     key: "esc / q",
-    action: "back",
+    action: Action::Quit,
 }];
 
 static KEYMAP_FILTER_INPUT: &[KeyBinding] = &[
     KeyBinding {
         key: "type",
-        action: "narrow filter",
+        action: Action::Filter,
     },
     KeyBinding {
         key: "backspace",
-        action: "delete character",
+        action: Action::DeleteChar,
     },
     KeyBinding {
         key: "↑↓",
-        action: "move within matches",
+        action: Action::MoveUp,
     },
     KeyBinding {
         key: "enter",
-        action: "keep selection and close",
+        action: Action::Open,
     },
     KeyBinding {
         key: "esc",
-        action: "clear and close",
+        action: Action::Quit,
     },
 ];
 
 static KEYMAP_CHEATSHEET: &[KeyBinding] = &[
     KeyBinding {
         key: "any key",
-        action: "dismiss",
+        action: Action::Quit,
     },
     KeyBinding {
         key: "esc",
-        action: "dismiss",
+        action: Action::Quit,
     },
 ];
 
 static KEYMAP_COMMAND_LOG: &[KeyBinding] = &[
     KeyBinding {
         key: "↑↓ / j k",
-        action: "scroll",
+        action: Action::MoveUp,
     },
     KeyBinding {
         key: "esc / q / l",
-        action: "close",
+        action: Action::Quit,
+    },
+];
+
+static KEYMAP_PALETTE: &[KeyBinding] = &[
+    KeyBinding {
+        key: "type",
+        action: Action::Filter,
+    },
+    KeyBinding {
+        key: "↑↓",
+        action: Action::MoveUp,
+    },
+    KeyBinding {
+        key: "enter",
+        action: Action::Open,
+    },
+    KeyBinding {
+        key: "esc",
+        action: Action::Quit,
+    },
+];
+
+static KEYMAP_BULK_CONFIRM: &[KeyBinding] = &[
+    KeyBinding {
+        key: "y / enter",
+        action: Action::Open,
+    },
+    KeyBinding {
+        key: "n / esc",
+        action: Action::Quit,
     },
 ];
 
@@ -232,16 +276,17 @@ pub fn keymap_for(ctx: KeyContext) -> &'static [KeyBinding] {
         KeyContext::FilterInput => KEYMAP_FILTER_INPUT,
         KeyContext::Cheatsheet => KEYMAP_CHEATSHEET,
         KeyContext::CommandLog => KEYMAP_COMMAND_LOG,
+        KeyContext::Palette => KEYMAP_PALETTE,
+        KeyContext::BulkConfirm => KEYMAP_BULK_CONFIRM,
     }
 }
 
-/// Derive a compact one-line help string from the List keymap.
-/// Replaces the hand-written `strings::HELP` const (D-1 decision: derive, don't duplicate).
+/// Derive a compact one-line help string from the given context's keymap.
 /// Returns a freshly-allocated `String`; callers may cache if needed.
 pub fn help_line(ctx: KeyContext) -> String {
     keymap_for(ctx)
         .iter()
-        .map(|kb| format!("{} {}", kb.key, kb.action))
+        .map(|kb| format!("{} {}", kb.key, kb.action.label()))
         .collect::<Vec<_>>()
         .join(" · ")
 }
