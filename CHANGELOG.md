@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/Rynaro/cardboard-box/compare/v0.9.0...v0.10.0) (2026-06-20)
+
+
+### Features
+
+* **tui:** bundle 2 "living box" — sparklines, auto-refresh, palette, bulk ops ([#32](https://github.com/Rynaro/cardboard-box/issues/32)) ([da27c44](https://github.com/Rynaro/cardboard-box/commit/da27c44893f209a9058665bc11833f7a5c03fefc))
+
 ## [0.9.0](https://github.com/Rynaro/cardboard-box/compare/v0.8.0...v0.9.0) (2026-06-20)
 
 
