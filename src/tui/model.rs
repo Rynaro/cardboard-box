@@ -11,6 +11,7 @@ use crate::core::spec::{
 use crate::dbox::backend::Backend;
 use crate::tui::bulk::BulkOp;
 use crate::tui::cmdlog::CmdLog;
+use crate::tui::logstream::{LogBuffer, LOG_RING_CAP};
 use crate::tui::theme::{ColorMode, Skin};
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
@@ -24,6 +25,10 @@ pub enum Screen {
     ConfirmDestroy,
     Progress,
     DoctorPanel,
+    /// Bundle 3: full-screen live container-log streaming modal.
+    /// Entered from List (`L`), exited with Esc/q. The child process and thread
+    /// live shell-local; the Model holds only the pure display state.
+    Logs,
 }
 
 // ─── StatusLine ──────────────────────────────────────────────────────────────
@@ -167,7 +172,7 @@ impl Default for FilterState {
 // ─── Overlay (T2 – cheatsheet / command-log overlays) ────────────────────────
 
 /// Which (if any) non-filter overlay is currently active.
-/// Cheatsheet, CommandLog, and Palette are mutually exclusive — the enum enforces that.
+/// Cheatsheet, CommandLog, Palette, and History are mutually exclusive — the enum enforces that.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Overlay {
     #[default]
@@ -186,6 +191,17 @@ pub enum Overlay {
         cursor: usize,
         /// When `true`, the source is restricted to the four bulk actions (opened via `b`).
         bulk_only: bool,
+    },
+    /// Bundle 3: cross-session action history overlay (atuin-style fuzzy search).
+    History {
+        /// Raw user input (what they typed into the search box).
+        query: String,
+        /// Indices into `entries`, best-rank first from `fuzzy_rank`.
+        matches: Vec<usize>,
+        /// Selection within `matches` (0-based).
+        cursor: usize,
+        /// All loaded history entries (loaded from disk on open).
+        entries: Vec<crate::tui::history::HistoryEntry>,
     },
 }
 
@@ -332,6 +348,22 @@ pub struct Model {
     /// Bounded stats history for the Detail screen sparklines.
     /// `None` until the first sample arrives / when not on Detail.
     pub stats_history: Option<StatsHistory>,
+
+    // ── Bundle 3 fields ──────────────────────────────────────────────────────
+    /// Bounded ring buffer of log lines from the live streaming pane.
+    /// Pure — the child process and thread live in the shell (app.rs).
+    pub log_buffer: LogBuffer,
+    /// Scroll offset for the log pane (lines from bottom when autoscroll is off).
+    pub log_scroll: usize,
+    /// When `true`, new log chunks snap the view to the bottom (newest last).
+    pub log_autoscroll: bool,
+    /// When `true`, long lines are wrapped; when `false`, they are truncated.
+    pub log_wrap: bool,
+    /// The currently streaming target `(container_id, backend_str)`.
+    /// `None` when no stream is active or the log screen is closed.
+    pub log_target: Option<(String, String)>,
+    /// Set to `true` when the log stream thread signals EOF / container stopped.
+    pub log_ended: bool,
 }
 
 impl Model {
@@ -368,6 +400,13 @@ impl Model {
             poll_in_flight: false,
             bulk_confirm: None,
             stats_history: None,
+            // Bundle 3 defaults.
+            log_buffer: LogBuffer::new(LOG_RING_CAP),
+            log_scroll: 0,
+            log_autoscroll: true,
+            log_wrap: false,
+            log_target: None,
+            log_ended: false,
         }
     }
 

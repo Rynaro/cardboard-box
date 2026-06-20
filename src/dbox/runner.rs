@@ -12,6 +12,9 @@ pub enum RunMode {
     Interactive,
     /// Never spawn; return the would-be argv as stdout.
     DryRun,
+    /// Stream stdout lines to a callback, cancellable via an `AtomicBool`.
+    /// Used for `<backend> logs -f <id>` on a dedicated thread (GAP-2).
+    Stream,
 }
 
 /// A single subprocess invocation descriptor.
@@ -117,5 +120,32 @@ pub trait DistroboxRunner: Send + Sync {
     ) -> Result<CmdOutput, RunnerError> {
         let _ = timeout;
         self.run(inv)
+    }
+
+    /// Streaming mode: tails stdout line-by-line, calling `on_line` for each.
+    ///
+    /// The `stop` flag is checked between reads; when set to `true`, the child
+    /// is killed and reaped and the function returns. On EOF (process exits
+    /// normally), the child is reaped and the exit code returned.
+    ///
+    /// **Default impl:** returns `Err("streaming unsupported")` — every existing
+    /// mock stays green without implementing this method (R6/G-COMPAT).
+    ///
+    /// `RealRunner` provides the real BufReader loop + kill+reap idiom.
+    /// MUST be called on a **dedicated thread** (never the worker); see GAP-2.
+    fn run_stream(
+        &self,
+        inv: Invocation,
+        on_line: &mut dyn FnMut(String),
+        stop: &std::sync::atomic::AtomicBool,
+    ) -> Result<i32, RunnerError> {
+        let _ = (inv, on_line, stop);
+        Err(RunnerError::Io {
+            program: "run_stream".to_string(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "streaming unsupported by this runner",
+            ),
+        })
     }
 }

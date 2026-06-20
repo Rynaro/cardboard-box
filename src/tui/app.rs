@@ -17,10 +17,13 @@ mod inner {
         atomic::{AtomicBool, Ordering},
         mpsc, Arc,
     };
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use crossterm::{
-        event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+        event::{
+            self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+            MouseEventKind,
+        },
         execute,
         terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     };
@@ -33,7 +36,9 @@ mod inner {
     use crate::error::CboxError;
     use crate::tui::cmdlog::{CmdLog, LoggingRunner};
     use crate::tui::effect::{execute_effect, make_store, Effect};
-    use crate::tui::message::{Key, Message};
+    use crate::tui::history::HistoryStore;
+    use crate::tui::logstream::LogCoalescer;
+    use crate::tui::message::{Key, Message, Mouse};
     use crate::tui::model::Model;
     use crate::tui::update::update;
     use crate::tui::view::view;
@@ -52,7 +57,7 @@ mod inner {
         pub fn new() -> io::Result<(Self, Terminal<CrosstermBackend<Stdout>>)> {
             enable_raw_mode()?;
             let mut stdout = io::stdout();
-            execute!(stdout, EnterAlternateScreen)?;
+            execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
             let backend = CrosstermBackend::new(io::stdout());
             let terminal = Terminal::new(backend)?;
             TERMINAL_RESTORED.store(false, Ordering::SeqCst);
@@ -72,7 +77,10 @@ mod inner {
             .is_ok()
         {
             let _ = disable_raw_mode();
-            let _ = execute!(io::stdout(), LeaveAlternateScreen);
+            // DisableMouseCapture is inside the guard so the panic hook path
+            // (which calls restore_terminal_once) also disables mouse capture
+            // — no terminal corruption on panic (G-MOUSE-RESTORE).
+            let _ = execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
         }
     }
 
@@ -104,6 +112,45 @@ mod inner {
             KeyCode::Tab => Key::Tab,
             KeyCode::BackTab => Key::BackTab,
             _ => Key::Other,
+        }
+    }
+
+    // ─── Mouse normalisation (crossterm → internal Mouse) ────────────────────
+
+    fn normalize_mouse(event: crossterm::event::MouseEvent) -> Mouse {
+        match event.kind {
+            MouseEventKind::ScrollUp => Mouse::ScrollUp,
+            MouseEventKind::ScrollDown => Mouse::ScrollDown,
+            _ => Mouse::Other,
+        }
+    }
+
+    // ─── LogStream: dedicated thread + child lifecycle ───────────────────────
+
+    /// Shell-local state for the live log streaming thread.
+    /// Lives in `run_loop` beside `Worker` — NOT on the pure `Model`.
+    struct LogStream {
+        /// Set to `true` to request cancellation; the stream thread polls this.
+        stop: Arc<AtomicBool>,
+        /// Join handle for the dedicated stream thread. ALWAYS joined on teardown
+        /// — never detached — to prevent thread/child leaks (G-LOGLEAK).
+        join: std::thread::JoinHandle<()>,
+        /// Currently streaming target `(container_id, backend_str)`.
+        /// Used to detect same-target re-opens (idempotent).
+        target: (String, String),
+    }
+
+    /// Tear down the log stream: set the stop flag, join the thread.
+    ///
+    /// Setting the flag BEFORE joining: the stream thread sees `stop=true`,
+    /// kills + reaps the child, and exits. This makes `join` bounded.
+    /// Called on: pane-close, target-swap, Quit arm, AND post-loop teardown.
+    fn stop_log_stream(log_stream: &mut Option<LogStream>) {
+        if let Some(ls) = log_stream.take() {
+            ls.stop.store(true, Ordering::SeqCst);
+            // join() is bounded: the child is killed when the stop flag is set,
+            // which closes the pipe and unblocks read_line with EOF.
+            let _ = ls.join.join();
         }
     }
 
@@ -141,9 +188,9 @@ mod inner {
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
         runner: &dyn DistroboxRunner,
     ) -> Result<(), CboxError> {
-        // 1. Leave alt-screen.
+        // 1. Leave alt-screen. Disable mouse capture so the editor gets a clean terminal.
         let _ = terminal.show_cursor();
-        let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        let _ = execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
         let _ = disable_raw_mode();
         let _ = io::stdout().flush();
 
@@ -188,9 +235,9 @@ mod inner {
             // Validation errors are surfaced as a status message, not a hard failure.
         }
 
-        // 5. Restore terminal.
+        // 5. Restore terminal (re-enable mouse capture on return).
         let _ = enable_raw_mode();
-        let _ = execute!(io::stdout(), EnterAlternateScreen);
+        let _ = execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture);
         let _ = terminal.clear();
         TERMINAL_RESTORED.store(false, Ordering::SeqCst);
 
@@ -205,18 +252,18 @@ mod inner {
         runner: &dyn DistroboxRunner,
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     ) -> Result<i32, CboxError> {
-        // 1. Leave alt-screen.
+        // 1. Leave alt-screen. Disable mouse so the shell gets a clean terminal.
         let _ = terminal.show_cursor();
-        let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        let _ = execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
         let _ = disable_raw_mode();
         let _ = io::stdout().flush();
 
         // 2. Run enter interactively.
         let code = core::enter(spec, runner)?;
 
-        // 3. Restore terminal.
+        // 3. Restore terminal (re-enable mouse capture on return).
         let _ = enable_raw_mode();
-        let _ = execute!(io::stdout(), EnterAlternateScreen);
+        let _ = execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture);
         let _ = terminal.clear();
         TERMINAL_RESTORED.store(false, Ordering::SeqCst);
 
@@ -238,6 +285,9 @@ mod inner {
         let result_tx_for_worker = result_tx.clone();
 
         let worker = spawn_worker(runner_for_effects, result_tx_for_worker, backends);
+
+        // Shell-local log stream handle (beside Worker — NOT on Model).
+        let mut log_stream: Option<LogStream> = None;
 
         // Kick off initial list load.
         model.busy = true;
@@ -268,6 +318,15 @@ mod inner {
                 {
                     match event::read().map_err(|e| CboxError::ioerr(e.to_string()))? {
                         Event::Key(ke) => Some(Message::Key(normalize_key(ke))),
+                        Event::Mouse(me) => {
+                            let m = normalize_mouse(me);
+                            // Ignore Mouse::Other to avoid pointless Tick cycles.
+                            if m != Mouse::Other {
+                                Some(Message::Mouse(m))
+                            } else {
+                                None
+                            }
+                        }
                         Event::Resize(w, h) => Some(Message::Resize(w, h)),
                         _ => None,
                     }
@@ -287,6 +346,8 @@ mod inner {
                 match eff {
                     Effect::Quit => {
                         model.should_quit = true;
+                        // Stop any active log stream on quit (G-LOGLEAK).
+                        stop_log_stream(&mut log_stream);
                     }
                     Effect::SuspendAndEnter(spec) => {
                         let res = suspend_and_enter(&spec, runner.as_ref(), terminal);
@@ -302,12 +363,86 @@ mod inner {
                         let completion = Message::EditReturned(res);
                         let _eff2s = update(&mut model, completion);
                     }
+                    // ── Bundle 3: shell-handled streaming effects ─────────────
+                    Effect::StreamLogs { id, backend } => {
+                        let new_target = (id.clone(), backend.clone());
+                        // Idempotent: same target already streaming → skip.
+                        if let Some(ref ls) = log_stream {
+                            if ls.target == new_target {
+                                continue;
+                            }
+                        }
+                        // Tear down old stream first (target swap).
+                        stop_log_stream(&mut log_stream);
+
+                        // Spawn dedicated thread for the log stream.
+                        let stop_flag = Arc::new(AtomicBool::new(false));
+                        let stop_for_thread = Arc::clone(&stop_flag);
+                        let runner_for_stream = Arc::clone(&runner);
+                        let tx_for_stream = result_tx.clone();
+                        let id_for_thread = id.clone();
+                        let backend_for_thread = backend.clone();
+
+                        let join = std::thread::spawn(move || {
+                            let backend_obj =
+                                crate::dbox::backend::Backend::from_name(&backend_for_thread)
+                                    .unwrap_or(crate::dbox::backend::Backend::Podman);
+
+                            let mut coalescer = LogCoalescer::new();
+                            let mut last_flush = Instant::now();
+
+                            let mut on_line = |line: String| {
+                                let size_due = coalescer.push(line);
+                                let time_elapsed = last_flush.elapsed().as_millis() as u64;
+                                let time_due = coalescer.due_at(time_elapsed);
+
+                                if size_due || time_due {
+                                    let chunk = coalescer.drain();
+                                    last_flush = Instant::now();
+                                    if !chunk.is_empty() {
+                                        let _ = tx_for_stream.try_send(Message::LogChunk(chunk));
+                                    }
+                                }
+                            };
+
+                            let code = crate::core::logs(
+                                &id_for_thread,
+                                &backend_obj,
+                                runner_for_stream.as_ref(),
+                                &mut on_line,
+                                &stop_for_thread,
+                            );
+
+                            // Final drain: flush any remaining buffered lines.
+                            let remaining = coalescer.drain();
+                            if !remaining.is_empty() {
+                                let _ = tx_for_stream.try_send(Message::LogChunk(remaining));
+                            }
+
+                            // Signal stream end.
+                            let exit_code = code.ok();
+                            let _ = tx_for_stream.try_send(Message::LogStreamEnded(exit_code));
+                        });
+
+                        log_stream = Some(LogStream {
+                            stop: stop_flag,
+                            join,
+                            target: new_target,
+                        });
+                    }
+                    Effect::StopLogs => {
+                        stop_log_stream(&mut log_stream);
+                    }
                     other => {
                         route_to_worker(&worker, other);
                     }
                 }
             }
         }
+
+        // Post-loop unconditional teardown: stop any lingering log stream.
+        // This covers abrupt quit paths that bypass the Effect::Quit arm (G-LOGLEAK).
+        stop_log_stream(&mut log_stream);
 
         Ok(())
     }
@@ -332,10 +467,17 @@ mod inner {
         // The same Arc is given to the LoggingRunner decorator (writer) and the Model (reader).
         let cmdlog = Arc::new(std::sync::Mutex::new(CmdLog::new(200)));
 
+        // Build the shared history store (cross-session persist, redacted).
+        // The same Arc is given to LoggingRunner (writer); the overlay reads via HistoryStore::load().
+        let history = Arc::new(std::sync::Mutex::new(HistoryStore::new()));
+
         // Wrap the injected runner in the LoggingRunner decorator so every spawn
         // is captured at the single chokepoint (DistroboxRunner::run / run_interactive).
-        let logging_runner: Arc<dyn DistroboxRunner> =
-            Arc::new(LoggingRunner::new(runner, Arc::clone(&cmdlog)));
+        let logging_runner: Arc<dyn DistroboxRunner> = Arc::new(LoggingRunner::new(
+            runner,
+            Arc::clone(&cmdlog),
+            Arc::clone(&history),
+        ));
 
         // backends is non-empty (Backend::usable guarantees it); [0] is the
         // preferred engine used as the default for creating new boxes.

@@ -14,6 +14,8 @@ pub mod bulk;
 // poll is ungated — pure gating helper; lean-clean.
 pub mod poll;
 // cmdlog is ungated — pure ring buffer; the LoggingRunner decorator inside it is tui-gated.
+// history is ungated — lean pure module (no ratatui dep); compilable under --no-default-features.
+// logstream is ungated — lean pure module (LogCoalescer + LogBuffer + constants).
 #[cfg(feature = "tui")]
 pub mod app;
 pub mod cmdlog;
@@ -21,6 +23,8 @@ pub mod cmdlog;
 pub mod effect;
 #[cfg(feature = "tui")]
 pub mod filter;
+pub mod history;
+pub mod logstream;
 #[cfg(feature = "tui")]
 pub mod message;
 #[cfg(feature = "tui")]

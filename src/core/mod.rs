@@ -13,8 +13,8 @@ use std::time::Duration;
 use crate::dbox::{
     argv::{
         build_create_argv, build_dbox_list_argv, build_enter_argv, build_inspect_argv,
-        build_list_argv, build_pkg_probe_argv, build_provision_shell_argv, build_rm_argv,
-        build_stats_argv, build_stop_argv,
+        build_list_argv, build_logs_argv, build_pkg_probe_argv, build_provision_shell_argv,
+        build_rm_argv, build_stats_argv, build_stop_argv,
     },
     backend::Backend,
     runner::{DistroboxRunner, Invocation, RunMode},
@@ -209,6 +209,29 @@ pub fn stats(
     }
 
     parse_stats_json(&out.stdout)
+}
+
+/// Stream container logs line-by-line via `<backend> logs -f <id>`.
+///
+/// Calls `runner.run_stream` with the logs argv. `on_line` is called for each
+/// stdout line; `stop` is the cancel seam (set to `true` to kill+reap the child).
+/// This MUST be called from a dedicated thread (never the worker — GAP-2).
+///
+/// Program = `spec.backend.as_str()` (engine call, not a distrobox subcommand),
+/// mirroring `core::stats` at `mod.rs:204`.
+#[allow(dead_code)]
+pub fn logs(
+    id: &str,
+    backend: &Backend,
+    runner: &dyn DistroboxRunner,
+    on_line: &mut dyn FnMut(String),
+    stop: &std::sync::atomic::AtomicBool,
+) -> Result<i32, CboxError> {
+    let args = build_logs_argv(id);
+    let inv = Invocation::new(backend.as_str(), args, RunMode::Stream);
+    runner
+        .run_stream(inv, on_line, stop)
+        .map_err(|e| CboxError::ioerr(e.to_string()))
 }
 
 /// Parse `<backend> stats --no-stream --format json` output.

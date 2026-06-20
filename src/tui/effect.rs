@@ -78,6 +78,19 @@ pub enum Effect {
     /// Per-box stats poll for the Detail screen sparklines.
     /// Uses `run_with_timeout` (STATS_TIMEOUT_SECS).
     StatsPoll(StatsSpec),
+
+    // ── Bundle 3: streaming log effects ──────────────────────────────────────
+    /// Start (or swap to) a `<backend> logs -f <id>` stream on a dedicated thread.
+    /// Handled SHELL-LOCAL in `run_loop` (app.rs), not by `execute_effect`.
+    StreamLogs {
+        /// Container ID to tail.
+        id: String,
+        /// Backend string (e.g. "podman" or "docker").
+        backend: String,
+    },
+    /// Stop the current log stream (kill child + join thread).
+    /// Handled SHELL-LOCAL in `run_loop` (app.rs), not by `execute_effect`.
+    StopLogs,
 }
 
 /// Execute a data effect synchronously on the worker thread.
@@ -138,7 +151,11 @@ pub fn execute_effect(
         }
 
         // These are handled by the main thread, not the worker.
-        Effect::SuspendAndEnter(_) | Effect::SuspendAndEdit(_) | Effect::Quit => None,
+        Effect::SuspendAndEnter(_)
+        | Effect::SuspendAndEdit(_)
+        | Effect::Quit
+        | Effect::StreamLogs { .. }
+        | Effect::StopLogs => None,
 
         // ── Bundle 2: silent poll effects ────────────────────────────────────
         Effect::SilentLoadList => {

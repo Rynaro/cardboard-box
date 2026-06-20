@@ -43,6 +43,10 @@ pub enum KeyContext {
     Palette,
     /// Bulk-confirm modal: type phrase or y/n/esc.
     BulkConfirm,
+    /// Bundle 3: live log streaming screen.
+    Logs,
+    /// Bundle 3: action history overlay.
+    History,
 }
 
 // ─── Keymap tables ────────────────────────────────────────────────────────────
@@ -103,6 +107,14 @@ static KEYMAP_LIST: &[KeyBinding] = &[
     KeyBinding {
         key: "l",
         action: Action::CommandLog,
+    },
+    KeyBinding {
+        key: "L",
+        action: Action::ViewLogs,
+    },
+    KeyBinding {
+        key: "H",
+        action: Action::History,
     },
     KeyBinding {
         key: ":",
@@ -260,6 +272,40 @@ static KEYMAP_BULK_CONFIRM: &[KeyBinding] = &[
     },
 ];
 
+static KEYMAP_LOGS: &[KeyBinding] = &[
+    KeyBinding {
+        key: "↑↓ / j k",
+        action: Action::MoveUp,
+    },
+    KeyBinding {
+        key: "a",
+        action: Action::ViewLogs, // toggle autoscroll
+    },
+    KeyBinding {
+        key: "w",
+        action: Action::Edit, // toggle wrap (reuses Edit as a placeholder label)
+    },
+    KeyBinding {
+        key: "esc / q",
+        action: Action::Quit,
+    },
+];
+
+static KEYMAP_HISTORY: &[KeyBinding] = &[
+    KeyBinding {
+        key: "type",
+        action: Action::Filter,
+    },
+    KeyBinding {
+        key: "↑↓ / j k",
+        action: Action::MoveUp,
+    },
+    KeyBinding {
+        key: "esc / q",
+        action: Action::Quit,
+    },
+];
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /// Return the slice of `KeyBinding` entries for the given context.
@@ -278,6 +324,9 @@ pub fn keymap_for(ctx: KeyContext) -> &'static [KeyBinding] {
         KeyContext::CommandLog => KEYMAP_COMMAND_LOG,
         KeyContext::Palette => KEYMAP_PALETTE,
         KeyContext::BulkConfirm => KEYMAP_BULK_CONFIRM,
+        // Bundle 3
+        KeyContext::Logs => KEYMAP_LOGS,
+        KeyContext::History => KEYMAP_HISTORY,
     }
 }
 

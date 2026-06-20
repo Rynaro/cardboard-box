@@ -85,9 +85,11 @@ mod logging_runner {
 
     use super::CmdLog;
     use crate::dbox::runner::{CmdOutput, DistroboxRunner, Invocation, RunMode, RunnerError};
+    use crate::tui::history::{redact_argv, HistoryStore};
 
     /// A `DistroboxRunner` decorator that captures the real argv + exit code of
-    /// every spawned command into a shared `CmdLog` ring buffer.
+    /// every spawned command into a shared `CmdLog` ring buffer AND the persistent
+    /// `HistoryStore` (cross-session, redacted).
     ///
     /// DryRun invocations are NOT logged (they never spawn a real process).
     ///
@@ -97,11 +99,20 @@ mod logging_runner {
     pub struct LoggingRunner {
         inner: Arc<dyn DistroboxRunner>,
         log: Arc<Mutex<CmdLog>>,
+        history: Arc<Mutex<HistoryStore>>,
     }
 
     impl LoggingRunner {
-        pub fn new(inner: Arc<dyn DistroboxRunner>, log: Arc<Mutex<CmdLog>>) -> Self {
-            LoggingRunner { inner, log }
+        pub fn new(
+            inner: Arc<dyn DistroboxRunner>,
+            log: Arc<Mutex<CmdLog>>,
+            history: Arc<Mutex<HistoryStore>>,
+        ) -> Self {
+            LoggingRunner {
+                inner,
+                log,
+                history,
+            }
         }
     }
 
@@ -113,7 +124,11 @@ mod logging_runner {
             if !skip {
                 let status = out.as_ref().ok().map(|o| o.status);
                 if let Ok(mut log) = self.log.lock() {
-                    log.push(argv, status);
+                    log.push(argv.clone(), status);
+                }
+                // Persist to cross-session history (redacted, best-effort).
+                if let Ok(h) = self.history.lock() {
+                    h.append(redact_argv(&argv), status);
                 }
             }
             out
@@ -124,7 +139,11 @@ mod logging_runner {
             let res = self.inner.run_interactive(inv);
             let status = res.as_ref().ok().copied();
             if let Ok(mut log) = self.log.lock() {
-                log.push(argv, status);
+                log.push(argv.clone(), status);
+            }
+            // Persist to cross-session history (redacted, best-effort).
+            if let Ok(h) = self.history.lock() {
+                h.append(redact_argv(&argv), status);
             }
             res
         }

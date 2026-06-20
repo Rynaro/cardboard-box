@@ -45,6 +45,11 @@ pub enum Action {
     /// Appears in the FilterInput and Palette keymaps but NOT in the palette
     /// itself (not in_palette()).
     DeleteChar,
+    // ── Bundle 3 ─────────────────────────────────────────────────────────────
+    /// Open the cross-session action history overlay (fuzzy search, read-only).
+    History,
+    /// Open the live container-log streaming screen for the selected box.
+    ViewLogs,
 }
 
 impl Action {
@@ -75,6 +80,8 @@ impl Action {
             Action::BulkDestroyManaged => "bulk: destroy cbox-managed",
             Action::BulkDestroyUnmanaged => "bulk: destroy NON-managed",
             Action::DeleteChar => "delete character",
+            Action::History => "history",
+            Action::ViewLogs => "view logs",
         }
     }
 
@@ -83,6 +90,12 @@ impl Action {
     /// Navigation and input-helper actions are omitted.
     pub fn in_palette(self) -> bool {
         !matches!(self, Action::MoveUp | Action::MoveDown | Action::DeleteChar)
+    }
+
+    /// Whether this action is a Bundle 3 action (for tests / enumeration).
+    #[allow(dead_code)]
+    pub fn is_bundle3(self) -> bool {
+        matches!(self, Action::History | Action::ViewLogs)
     }
 
     /// The display key for this action in the default keymap, if one exists.
@@ -110,6 +123,8 @@ impl Action {
             Action::BulkDestroyManaged => None,
             Action::BulkDestroyUnmanaged => None,
             Action::DeleteChar => Some("backspace"),
+            Action::History => Some("H"),
+            Action::ViewLogs => Some("L"),
         }
     }
 }
@@ -138,6 +153,9 @@ pub const ALL_ACTIONS: &[Action] = &[
     Action::BulkDestroyManaged,
     Action::BulkDestroyUnmanaged,
     Action::DeleteChar,
+    // Bundle 3
+    Action::History,
+    Action::ViewLogs,
 ];
 
 /// The ordered list of actions offered in the `:` command palette.
@@ -170,6 +188,9 @@ const PALETTE_ACTIONS: &[Action] = &[
     Action::BulkStopRunning,
     Action::BulkDestroyManaged,
     Action::BulkDestroyUnmanaged,
+    // Bundle 3
+    Action::History,
+    Action::ViewLogs,
 ];
 
 /// The four bulk actions (for `bulk_only` palette scope).

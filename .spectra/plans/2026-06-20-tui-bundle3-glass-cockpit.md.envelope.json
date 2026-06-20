@@ -1,0 +1,24 @@
+{
+  "envelope_version": "2.0",
+  "message_id": "7b2e2037-2bb5-4ee2-84e8-6dda7345ba36",
+  "thread_id": "ebaf3af3-ea31-4bb5-a8c4-f0162f8698be",
+  "from": "spectra",
+  "to": "apivr",
+  "performative": "PROPOSE",
+  "edge_origin": "roster",
+  "created_at": "2026-06-20",
+  "artifact": {
+    "kind": "spec",
+    "spec_id": "2026-06-20-tui-bundle3-glass-cockpit",
+    "path": "2026-06-20-tui-bundle3-glass-cockpit.md",
+    "title": "cbox TUI Bundle 3 Glass Cockpit (FOCUSED)"
+  },
+  "integrity": {
+    "method": "sha256",
+    "value": "27595740a119b7a0f06bfccac88f49cddfbdc84b5370ebbd0c1b85b7af9989d3"
+  },
+  "trust_level": "standard",
+  "required_sections": ["stories", "validation_gates", "agent_hints", "given_when_then"],
+  "confidence": 0.905,
+  "decision": "AUTO_PROCEED"
+}

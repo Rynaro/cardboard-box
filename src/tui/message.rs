@@ -29,6 +29,16 @@ pub enum Key {
     Other,
 }
 
+/// Internal mouse representation — scroll-only, decoupled from crossterm.
+/// No click, no hit-testing, no layout Rects (spec constraint).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Mouse {
+    ScrollUp,
+    ScrollDown,
+    /// Any other mouse event — ignored by the reducer.
+    Other,
+}
+
 /// Outcomes from create / rm that don't have a richer struct in core yet.
 #[derive(Debug, Clone)]
 pub struct CreateOutcome {
@@ -53,6 +63,8 @@ pub enum Message {
     Key(Key),
     Tick,
     Resize(u16, u16),
+    /// Bundle 3: mouse scroll event (scroll-only, no click).
+    Mouse(Mouse),
 
     // ── effect completions (from the worker thread) ──
     ListLoaded(Result<Vec<BoxRow>, CboxError>),
@@ -73,4 +85,11 @@ pub enum Message {
     SilentListLoaded(Result<Vec<BoxRow>, CboxError>),
     /// Stats poll complete — feeds history buffer on Ok, swallowed silently on Err.
     StatsLoaded(Result<StatsSample, CboxError>),
+
+    // ── Bundle 3: streaming log completions (from dedicated stream thread) ──
+    /// A coalesced batch of log lines from the stream thread.
+    LogChunk(Vec<String>),
+    /// The log stream has ended (container stopped or cancelled). Contains the
+    /// exit code of the `<backend> logs -f` process, if available.
+    LogStreamEnded(Option<i32>),
 }
