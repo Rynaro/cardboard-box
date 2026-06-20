@@ -509,14 +509,28 @@ fn refresh_r_emits_load_list() {
     assert!(model.busy);
 }
 
-// ─── Extra: doctor panel ─────────────────────────────────────────────────────
+// ─── Extra: doctor panel (AC-REBIND-1 / AC-REBIND-2) ────────────────────────
 
+// Doctor was previously bound to `?`; it moved to uppercase `D` (AC-REBIND-1).
 #[test]
-fn doctor_question_mark_opens_panel() {
+fn doctor_uppercase_d_opens_panel() {
     let mut model = make_model();
-    let effects = update(&mut model, key_msg(Key::Char('?')));
+    let effects = update(&mut model, key_msg(Key::Char('D')));
     assert_eq!(model.screen, Screen::DoctorPanel);
     assert!(effects.iter().any(|e| matches!(e, Effect::Doctor(_))));
+}
+
+// `?` must NOT open doctor any more (AC-REBIND-2: now opens cheatsheet).
+#[test]
+fn question_mark_no_longer_opens_doctor() {
+    let mut model = make_model();
+    let effects = update(&mut model, key_msg(Key::Char('?')));
+    // Should NOT transition to DoctorPanel (cheatsheet overlay check runs in update, not screendispatch)
+    assert_ne!(model.screen, Screen::DoctorPanel);
+    assert!(
+        !effects.iter().any(|e| matches!(e, Effect::Doctor(_))),
+        "? must not emit Doctor effect"
+    );
 }
 
 // ─── Extra: ListLoaded clamps selection ──────────────────────────────────────

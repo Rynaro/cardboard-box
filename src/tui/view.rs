@@ -12,7 +12,8 @@ mod inner {
         Frame,
     };
 
-    use crate::tui::model::{Model, Screen, StatusLine, WizardStep};
+    use crate::tui::keymap::{keymap_for, KeyContext};
+    use crate::tui::model::{Model, Overlay, Screen, StatusLine, WizardStep};
     use crate::tui::strings;
     use crate::tui::theme::{badge_span, header_should_collapse, ok_glyph, Theme};
 
@@ -20,8 +21,8 @@ mod inner {
 
     pub fn view(model: &Model, frame: &mut Frame) {
         let area = frame.area();
-        // Build theme once per frame from the model's detected color mode.
-        let theme = Theme::resolve(model.color_mode);
+        // Build theme once per frame from the model's skin + detected color mode.
+        let theme = Theme::resolve(model.skin, model.color_mode);
 
         if model.screen == Screen::List {
             // List screen gets a 3-region vertical split: header | body | status.
@@ -37,6 +38,9 @@ mod inner {
             render_brand_header(frame, chunks[0], area.width, &theme);
             render_list(model, frame, chunks[1], &theme);
             render_status_bar(model, frame, chunks[2], &theme);
+
+            // Render toasts over the list screen.
+            render_toasts(model, frame, chunks[1], &theme);
         } else {
             // All other screens: 2-region split (body | status).
             let chunks = Layout::default()
@@ -57,6 +61,23 @@ mod inner {
             }
 
             render_status_bar(model, frame, chunks[1], &theme);
+            render_toasts(model, frame, chunks[0], &theme);
+        }
+
+        // Overlays rendered on top of everything.
+        match &model.overlay {
+            Overlay::None => {}
+            Overlay::Cheatsheet => {
+                render_cheatsheet(model, frame, area, &theme);
+            }
+            Overlay::CommandLog { scroll } => {
+                render_command_log(model, frame, area, *scroll, &theme);
+            }
+        }
+
+        // Filter input bar rendered when filter is active.
+        if model.filter.is_some() {
+            render_filter_bar(model, frame, area, &theme);
         }
     }
 
@@ -94,11 +115,26 @@ mod inner {
     // ─── Box list ─────────────────────────────────────────────────────────────
 
     fn render_list(model: &Model, frame: &mut Frame, area: ratatui::layout::Rect, theme: &Theme) {
+        // Build title: show filter query hint when active.
+        let title_text = if let Some(ref f) = model.filter {
+            if f.query.is_empty() {
+                " your boxes [/] ".to_string()
+            } else {
+                format!(" your boxes [/{}_] ", f.query)
+            }
+        } else {
+            " your boxes ".to_string()
+        };
+
         let block = Block::default()
-            .title(Span::styled(" your boxes ", theme.title))
+            .title(Span::styled(title_text, theme.title))
             .borders(Borders::ALL)
             .border_type(BorderType::Thick)
-            .border_style(theme.border);
+            .border_style(if model.filter.is_some() {
+                theme.accent
+            } else {
+                theme.border
+            });
 
         if model.busy && model.boxes.is_empty() {
             let spinner = SPINNER_FRAMES[model.spinner_tick % SPINNER_FRAMES.len()];
@@ -136,11 +172,13 @@ mod inner {
             Cell::from("CBOX?").style(theme.header_cell),
         ]);
 
-        let rows: Vec<Row> = model
-            .boxes
+        // When a filter is active, only render the matched subset.
+        let indices = model.filtered_indices();
+
+        let rows: Vec<Row> = indices
             .iter()
-            .enumerate()
-            .map(|(i, b)| {
+            .map(|&i| {
+                let b = &model.boxes[i];
                 let is_selected = model.selected == Some(i);
                 let row_style = if is_selected {
                     theme.selection
@@ -148,14 +186,7 @@ mod inner {
                     Style::default()
                 };
 
-                let status_span = if is_selected {
-                    // On selected row the row_style already drives bg/fg — just use the
-                    // badge glyph+label without overriding color so selection stands out.
-                    badge_span(&b.status, theme)
-                } else {
-                    badge_span(&b.status, theme)
-                };
-
+                let status_span = badge_span(&b.status, theme);
                 let cbox_str = if b.cbox_managed { "yes" } else { "no" };
 
                 Row::new(vec![
@@ -189,6 +220,39 @@ mod inner {
             .highlight_style(Style::default().add_modifier(Modifier::BOLD));
 
         frame.render_widget(table, area);
+    }
+
+    // ─── Filter bar ───────────────────────────────────────────────────────────
+
+    fn render_filter_bar(
+        model: &Model,
+        frame: &mut Frame,
+        area: ratatui::layout::Rect,
+        theme: &Theme,
+    ) {
+        let f = match &model.filter {
+            Some(f) => f,
+            None => return,
+        };
+
+        let match_count = f.matches.len();
+        let total = model.boxes.len();
+        let hint = format!(
+            " / {} ({}/{})  ↑↓ move · enter keep · esc clear ",
+            f.query, match_count, total
+        );
+
+        // Position the filter bar at the bottom of the area.
+        let bar_area = ratatui::layout::Rect {
+            x: area.x,
+            y: area.y + area.height.saturating_sub(2),
+            width: area.width,
+            height: 1,
+        };
+
+        let p = Paragraph::new(Span::styled(hint, theme.accent));
+        frame.render_widget(Clear, bar_area);
+        frame.render_widget(p, bar_area);
     }
 
     // ─── Detail panel ─────────────────────────────────────────────────────────
@@ -306,18 +370,6 @@ mod inner {
             WizardStep::Confirm => 4,
         };
 
-        // Build step indicator as spans: active step in success style, inactive in muted.
-        let mut step_spans: Vec<Span> = Vec::new();
-        for (i, s) in steps.iter().enumerate() {
-            if i > 0 {
-                step_spans.push(Span::styled(" › ", theme.muted));
-            }
-            if i == current_step_idx {
-                step_spans.push(Span::styled(format!("[{s}]"), theme.success));
-            } else {
-                step_spans.push(Span::styled(s.to_string(), theme.muted));
-            }
-        }
         let step_indicator: String = steps
             .iter()
             .enumerate()
@@ -657,6 +709,189 @@ mod inner {
         frame.render_widget(p, inner);
     }
 
+    // ─── Cheatsheet overlay ───────────────────────────────────────────────────
+
+    fn render_cheatsheet(
+        model: &Model,
+        frame: &mut Frame,
+        area: ratatui::layout::Rect,
+        theme: &Theme,
+    ) {
+        // Determine the active context for the cheatsheet content.
+        let ctx = match model.screen {
+            Screen::List => KeyContext::List,
+            Screen::Detail => KeyContext::Detail,
+            Screen::Wizard => KeyContext::Wizard,
+            Screen::ConfirmDestroy => KeyContext::ConfirmDestroy,
+            Screen::Progress => KeyContext::Progress,
+            Screen::DoctorPanel => KeyContext::DoctorPanel,
+        };
+        let bindings = keymap_for(ctx);
+
+        let modal_width = 60u16.min(area.width.saturating_sub(4));
+        // 3 lines for borders/title/footer + 1 per binding.
+        let modal_height = (bindings.len() as u16 + 4).min(area.height.saturating_sub(2));
+        let modal_x = area.x + (area.width.saturating_sub(modal_width)) / 2;
+        let modal_y = area.y + (area.height.saturating_sub(modal_height)) / 2;
+
+        let modal_area = ratatui::layout::Rect {
+            x: modal_x,
+            y: modal_y,
+            width: modal_width,
+            height: modal_height,
+        };
+
+        frame.render_widget(Clear, modal_area);
+
+        let block = Block::default()
+            .title(Span::styled(
+                " cheatsheet ",
+                theme.accent.add_modifier(Modifier::BOLD),
+            ))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Double)
+            .border_style(theme.accent);
+
+        let inner = block.inner(modal_area);
+        frame.render_widget(block, modal_area);
+
+        let mut lines: Vec<Line> = bindings
+            .iter()
+            .map(|kb| {
+                Line::from(vec![
+                    Span::styled(format!("  {:12}", kb.key), theme.accent),
+                    Span::styled("  ", theme.muted),
+                    Span::raw(kb.action),
+                ])
+            })
+            .collect();
+
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("  any key — dismiss", theme.muted)));
+
+        let p = Paragraph::new(lines).wrap(Wrap { trim: false });
+        frame.render_widget(p, inner);
+    }
+
+    // ─── Command-log overlay ─────────────────────────────────────────────────
+
+    fn render_command_log(
+        model: &Model,
+        frame: &mut Frame,
+        area: ratatui::layout::Rect,
+        scroll: usize,
+        theme: &Theme,
+    ) {
+        let modal_width = (area.width.saturating_sub(4)).min(100);
+        let modal_height = area.height.saturating_sub(4).max(6);
+        let modal_x = area.x + (area.width.saturating_sub(modal_width)) / 2;
+        let modal_y = area.y + (area.height.saturating_sub(modal_height)) / 2;
+
+        let modal_area = ratatui::layout::Rect {
+            x: modal_x,
+            y: modal_y,
+            width: modal_width,
+            height: modal_height,
+        };
+
+        frame.render_widget(Clear, modal_area);
+
+        let block = Block::default()
+            .title(Span::styled(
+                strings::CMDLOG_TITLE,
+                theme.accent.add_modifier(Modifier::BOLD),
+            ))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Thick)
+            .border_style(theme.border);
+
+        let inner = block.inner(modal_area);
+        frame.render_widget(block, modal_area);
+
+        // Read from the shared log (lock briefly for render).
+        let entries: Vec<_> = if let Ok(log) = model.cmdlog.lock() {
+            log.entries().map(|e| (e.argv.clone(), e.status)).collect()
+        } else {
+            vec![]
+        };
+
+        if entries.is_empty() {
+            let p = Paragraph::new(vec![
+                Line::from(Span::styled(strings::CMDLOG_EMPTY, theme.muted)),
+                Line::from(""),
+                Line::from(Span::styled(strings::CMDLOG_HINT, theme.muted)),
+            ])
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true });
+            frame.render_widget(p, inner);
+            return;
+        }
+
+        let mut lines: Vec<Line> = entries
+            .iter()
+            .map(|(argv, status)| {
+                let glyph = match status {
+                    Some(0) => Span::styled("✓", theme.success),
+                    Some(_) => Span::styled("✗", theme.danger),
+                    None => Span::styled("·", theme.muted),
+                };
+                Line::from(vec![glyph, Span::raw(" "), Span::raw(argv.clone())])
+            })
+            .collect();
+
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(strings::CMDLOG_HINT, theme.muted)));
+
+        let p = Paragraph::new(lines)
+            .scroll((scroll as u16, 0))
+            .wrap(Wrap { trim: false });
+        frame.render_widget(p, inner);
+    }
+
+    // ─── Toast stack ─────────────────────────────────────────────────────────
+
+    fn render_toasts(model: &Model, frame: &mut Frame, area: ratatui::layout::Rect, theme: &Theme) {
+        use crate::tui::model::ToastKind;
+
+        if model.toasts.is_empty() {
+            return;
+        }
+
+        // Render toasts stacked at bottom-right of the given area.
+        let max_width = (area.width / 2).clamp(30, 60);
+        let toast_height = 1u16;
+
+        for (i, toast) in model.toasts.iter().enumerate() {
+            let y_offset = model.toasts.len().saturating_sub(i + 1) as u16;
+            let toast_y = area.y + area.height.saturating_sub(y_offset + 1);
+            let toast_x = area.x + area.width.saturating_sub(max_width);
+
+            let toast_area = ratatui::layout::Rect {
+                x: toast_x,
+                y: toast_y,
+                width: max_width,
+                height: toast_height,
+            };
+
+            let style = match toast.kind {
+                ToastKind::Success => theme.success,
+                ToastKind::Info => theme.accent,
+                ToastKind::Error => theme.danger,
+            };
+
+            let prefix = match toast.kind {
+                ToastKind::Success => "✓ ",
+                ToastKind::Info => "· ",
+                ToastKind::Error => "✗ ",
+            };
+
+            let text = format!("{prefix}{}", toast.text);
+            let p = Paragraph::new(Span::styled(text, style));
+            frame.render_widget(Clear, toast_area);
+            frame.render_widget(p, toast_area);
+        }
+    }
+
     // ─── Status bar ───────────────────────────────────────────────────────────
 
     fn render_status_bar(
@@ -665,10 +900,15 @@ mod inner {
         area: ratatui::layout::Rect,
         theme: &Theme,
     ) {
-        let help = strings::HELP;
+        // Derive the help string from the keymap (single source of truth, D-1).
+        let help = keymap_for(KeyContext::List)
+            .iter()
+            .map(|kb| format!("{} {}", kb.key, kb.action))
+            .collect::<Vec<_>>()
+            .join(" · ");
 
         let (status_text, style) = match &model.status {
-            StatusLine::Idle => (help.to_string(), theme.muted),
+            StatusLine::Idle => (help.clone(), theme.muted),
             StatusLine::Busy(msg) => {
                 let spinner = SPINNER_FRAMES[model.spinner_tick % SPINNER_FRAMES.len()];
                 (format!("{spinner} {msg}"), theme.accent)

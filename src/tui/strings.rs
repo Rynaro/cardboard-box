@@ -34,8 +34,19 @@ pub const ERROR_PREFIX: &str = "\u{2717} ";
 
 // ─── Help line (status bar) ───────────────────────────────────────────────────
 
+// NOTE (D-1): The canonical help text is derived from `keymap::help_line(KeyContext::List)`
+// at render time in view.rs so the status bar and the cheatsheet never drift.
+// This const is kept as a legacy alias so AC-COPY-1 can assert voice compliance
+// on a stable value. Keep it in sync with the List keymap manually if verbs change.
 pub const HELP: &str =
-    "\u{2191}\u{2193} move \u{00b7} enter open \u{00b7} c create \u{00b7} s stop \u{00b7} d destroy \u{00b7} a apply \u{00b7} e edit \u{00b7} ? doctor \u{00b7} q quit";
+    "\u{2191}\u{2193} move \u{00b7} enter open \u{00b7} c pack \u{00b7} s seal \u{00b7} d clear out \u{00b7} a apply \u{00b7} e edit \u{00b7} ? cheatsheet \u{00b7} D doctor \u{00b7} q quit";
+
+// ─── Command-log overlay copy ────────────────────────────────────────────────
+
+pub const CMDLOG_TITLE: &str = " command log ";
+pub const CMDLOG_EMPTY: &str = "Nothing has run yet.";
+pub const CMDLOG_HINT: &str =
+    "What cbox ran, newest last. This is a record - it can't undo anything.";
 
 // ─── Parameterized copy ───────────────────────────────────────────────────────
 

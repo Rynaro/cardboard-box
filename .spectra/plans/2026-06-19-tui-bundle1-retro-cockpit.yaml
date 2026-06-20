@@ -1,0 +1,314 @@
+spec_id: 2026-06-19-tui-bundle1-retro-cockpit
+title: cbox TUI Bundle 1 "Retro Cockpit"
+intent: REQUEST_CHANGE
+methodology: SPECTRA
+methodology_version: 4.9.1
+complexity: 9
+confidence: 0.88
+decision: AUTO_PROCEED
+coder: vivi
+micro_task_coder: kupo
+release:
+  type: feat
+  bump: minor
+  from: 0.8.0
+  to: 0.9.0
+
+build_constraint:
+  containerized: true
+  never_host_cargo: true
+  targets: [make build, make release, make test, make fmt, make fmt-check, make lint, make lint-lean, make check]
+  tui_feature_default_on: true
+  lean_build_gate: make lint-lean   # builds WITHOUT tui feature; must stay clean
+
+locked_flags:
+  cheatsheet_key: "?"
+  doctor_rebind_key: "D"
+  command_log: echo_only_no_undo
+  fuzzy_substrate: nucleo-matcher
+
+voice_rule:
+  banned_adjectives: [cozy, beautiful, friendly, delightful, cute, lovely]
+  enforced_by: tests/tui_theme.rs::ac_copy_1   # extend list with every new const
+
+ground_truth_anchors:
+  model: src/tui/model.rs   # Screen enum 13-20; status field 142; color_mode 156; move_up/down 197-218
+  message: src/tui/message.rs   # Key 13-28; Message 47-68
+  update: src/tui/update.rs   # handle_key 60-79; handle_key_list 84-211; ?->Doctor 198-205; Tick 30-36; completion handlers 638-878
+  view: src/tui/view.rs   # screen dispatch 47-57; modal pattern 51-54,409-468; render_list 96-192; status bar 662-682
+  theme: src/tui/theme.rs   # resolve 129-135; truecolor 139-177; ansi16 179-210; nocolor 214-238
+  strings: src/tui/strings.rs   # HELP 37-38
+  effect: src/tui/effect.rs   # Effect enum 41-69; execute_effect 77-131; send+sync assert 141-142
+  app: src/tui/app.rs   # spawn_worker 116-133; run_loop 227-312; run 320-337; sync_channel(4)/(32) 121,236
+  runner: src/dbox/runner.rs   # trait 89-96; Invocation::argv 41-45; CmdOutput 49-56
+  real_runner: src/dbox/real.rs   # run 8-50; run_interactive 52-77
+  mock_runner: src/dbox/mock.rs   # records calls 139-183
+  existing_tests:
+    - tests/tui_update.rs   # reducer ACs; doctor_question_mark_opens_panel 514-520 (MIGRATE)
+    - tests/tui_theme.rs   # pure-helper ACs; nocolor invariant 88-124; AC-COPY-1 246-283
+    - tests/tui_effects.rs
+
+data_model:
+  new_modules:
+    - { path: src/tui/keymap.rs, gated: false, purpose: "KeyBinding + KeyContext + keymap_for + help_line (single source of truth)" }
+    - { path: src/tui/filter.rs, gated: "tui", purpose: "fuzzy_rank wrapping nucleo_matcher::Matcher" }
+    - { path: src/tui/cmdlog.rs, gated: false, purpose: "CmdLog ring + CmdLogEntry + LoggingRunner decorator" }
+  new_model_fields:
+    - { name: filter, type: "Option<FilterState>", default: None }
+    - { name: overlay, type: "Overlay", default: "Overlay::None" }
+    - { name: skin, type: "Skin", default: "Skin::Kraft" }
+    - { name: toasts, type: "Vec<Toast>", default: "[]", bound: 3 }
+    - { name: cmdlog, type: "Arc<Mutex<CmdLog>>", default: "shared handle from app::run", bound: 200 }
+  new_types:
+    FilterState: { query: String, matches: "Vec<usize> (indices into boxes)", cursor: usize }
+    Overlay: "enum { None, Cheatsheet, CommandLog { scroll: usize } }"
+    Skin: "enum { Kraft, Carbon, Blueprint }  // Copy+Eq+Debug; next(), name()"
+    ToastKind: "enum { Success, Info, Error }"
+    Toast: { kind: ToastKind, text: String, born_tick: usize, ttl_ticks: usize }
+    CmdLogEntry: { argv: String, status: "Option<i32>", seq: u64 }
+    CmdLog: { buf: "VecDeque<CmdLogEntry>", cap: usize, next_seq: u64 }
+  index_mapping:
+    rule: "filter NEVER mutates model.boxes"
+    effective_selection: "filter.matches[filter.cursor] when filter Some; else direct boxes index"
+    nav: "move_up/move_down gain a filter-aware branch; None branch == today verbatim (keeps ac_nav_* green)"
+    resync: "on type/backspace and on ListLoaded-while-filtered: recompute matches, clamp cursor, set selected"
+  fuzzy_crate:
+    choice: nucleo-matcher
+    version: "0.3"
+    cargo_decl: 'nucleo-matcher = { version = "0.3", optional = true }   # under tui feature (D-2 default)'
+    rationale: "Helix-grade, pure Matcher API (Option<u32> score), no async runtime, forward-compatible with the high-level nucleo crate later bundles need"
+    rejected: "fuzzy-matcher (SkimMatcherV2) — would force a later swap from the substrate role"
+
+keymap:
+  source_of_truth: src/tui/keymap.rs
+  list_screen:
+    - { key: "↑↓ / j k", action: move }
+    - { key: enter, action: open }
+    - { key: i, action: inspect }
+    - { key: c, action: "pack (create)" }
+    - { key: s, action: "seal (stop)" }
+    - { key: d, action: "clear out (destroy)" }
+    - { key: a, action: apply }
+    - { key: e, action: edit }
+    - { key: r, action: refresh }
+    - { key: "/", action: filter, status: NEW }
+    - { key: "?", action: cheatsheet, status: REBIND_from_doctor }
+    - { key: D, action: doctor, status: NEW_moved_from_question_mark }
+    - { key: t, action: skin, status: NEW, scope: global }
+    - { key: l, action: "command-log", status: NEW }
+    - { key: "q / esc", action: quit, note: "esc closes overlays first" }
+  contexts:
+    FilterInput: "type · backspace · ↑↓ move-within-matches · enter keep+close · esc clear+close   (j/k are TEXT here, not nav)"
+    Cheatsheet: "any key / esc dismiss"
+    CommandLog: "↑↓/j/k scroll · esc/q/l close"
+  precedence:
+    - "1. Ctrl-C/Ctrl-D -> Quit (even busy)"
+    - "2. busy -> drop key"
+    - "3. filter.is_some() -> handle_key_filter (intercepts all keys)"
+    - "4. overlay match: Cheatsheet any-key/esc close; CommandLog scroll/esc; None fall through"
+    - "5. global: Char('t') skin-cycle, Char('?') cheatsheet (reachable any non-busy screen)"
+    - "6. match model.screen (existing dispatch + new List arms / l / D)"
+  conflicts_resolved:
+    - "? was Doctor -> now cheatsheet; Doctor -> D (uppercase, distinct from d=destroy via case-sensitive crossterm Char)"
+    - "t, l, / all previously UNBOUND on List"
+    - "j/k = TEXT in FilterInput (avoid 'can't type j'); = scroll in CommandLog"
+
+skins:
+  resolve_signature: "Theme::resolve(skin: Skin, mode: ColorMode) -> Theme"
+  view_call_site: "view.rs:24 -> Theme::resolve(model.skin, model.color_mode)"
+  kraft: { status: default_unchanged, truecolor_accent: "Rgb(214,158,92)", ansi16_accent: Yellow }
+  carbon: { truecolor_accent_anchor: "Rgb(160,170,180)", ansi16_accent: White }
+  blueprint: { truecolor_accent_anchor: "Rgb(90,170,200)", ansi16_accent: Cyan }
+  nocolor_tier:
+    shared: true
+    skin_independent: true
+    rule: "NoColor arm ignores skin; returns the one existing nocolor() table (zero fg/bg, modifiers only) -> invariant holds for every skin"
+  cycle_copy: "ToastKind::Info  'Skin: kraft|carbon|blueprint'  (from Skin::name())"
+
+toasts:
+  coexists_with_status_line: true
+  status_line_unchanged: true   # model.status: StatusLine STAYS; tests keep asserting variants
+  migration:
+    helper_ok: "Model::set_status_ok(msg)  -> status=Ok(msg); push_toast(Success,msg)"
+    helper_error: "Model::set_status_error(msg) -> status=Error(msg); push_toast(Error,msg)"
+    refactor_sites: "~15 completion handlers (update.rs:659,688,707,730,753,...) call the helpers"
+    busy_no_toast: true   # StatusLine::Busy never spawns a toast
+  ttl:
+    clock: "model.spinner_tick (usize); Tick advances it (update.rs:31)"
+    expiry: "in Message::Tick: toasts.retain(|t| now - t.born_tick < t.ttl_ticks)"
+    default_ttl_success_info: 60   # ~3s idle
+    default_ttl_error: 120         # ~6s idle
+  render: "stacked region; bounded to <=3 visible; push drops oldest"
+
+command_log:
+  capture_point: "src/dbox/runner.rs:89-96 (DistroboxRunner::run / run_interactive) via LoggingRunner decorator"
+  decorator: "LoggingRunner { inner: Arc<dyn DistroboxRunner>, log: Arc<Mutex<CmdLog>> }"
+  wire_in: "app::run builds shared Arc<Mutex<CmdLog>>; wraps injected runner BEFORE spawn_worker; same Arc on Model"
+  no_effect_change: true   # zero edits to effect.rs/real.rs/core
+  no_message_variant: true # view reads model.cmdlog.lock() at render; reducer reads on Tick; no completion Message
+  captured: { argv: "space-joined program+args", status: "Option<i32> exit code", excluded: [stdout, stderr, dry_run] }
+  bound: 200
+  overlay_ux: "Clear + centered Rect over current screen; newest-last; glyph ✓/✗/· by status; scroll via Overlay::CommandLog{scroll}"
+  copy:
+    title: '" command log "'
+    empty: "Nothing has run yet."
+    hint: "What cbox ran, newest last. This is a record - it can't undo anything."
+    honesty: "explicitly states log cannot reverse a destroy; voice-compliant"
+
+stories:
+  - id: K1
+    title: "Rebind ?->cheatsheet trigger / Doctor->D + migrate the one assertion"
+    actor: maintainer
+    capability: "press D for doctor, freeing ? for the cheatsheet"
+    value: "unblocks keymap-as-data and the cheatsheet"
+    timebox: 1d
+    coder: kupo
+    micro_task: true
+    action_plan: [Modify update.rs:198-205 ?->D rebind, Create D arm -> DoctorPanel+Doctor effect, Migrate tests/tui_update.rs:514-520, Add ?->cheatsheet-placeholder test gate]
+    files: [src/tui/update.rs, tests/tui_update.rs]
+    depends: []
+    acceptance: [AC-REBIND-1, AC-REBIND-2]
+    verifier: make test
+    risk_tags: [P0]   # R-2 stale test
+  - id: T1
+    title: "Keymap-as-data module + status bar rewire"
+    actor: user
+    capability: "one table drives help line + cheatsheet"
+    value: "no drift between help and cheatsheet; testable keys"
+    timebox: 2d
+    coder: vivi
+    action_plan: [Create src/tui/keymap.rs (KeyBinding/KeyContext/keymap_for/help_line), Register in mod.rs (ungated), Modify view.rs status bar to use help_line, Modify/remove strings::HELP per D-1, Create tests/tui_keymap.rs]
+    files: [src/tui/keymap.rs, src/tui/mod.rs, src/tui/view.rs, src/tui/strings.rs, tests/tui_keymap.rs]
+    depends: [K1]
+    acceptance: [AC-MAP-1, AC-MAP-2, AC-MAP-VOICE]
+    verifier: make build; make lint-lean; make test
+    risk_tags: [P1]   # R-7 voice
+  - id: T2
+    title: "Cheatsheet overlay + Overlay enum + reducer precedence"
+    actor: user
+    capability: "press ? to see valid keys for the current context"
+    value: "discoverability without leaving the screen"
+    timebox: 2d
+    coder: vivi
+    action_plan: [Extend model.rs with Overlay enum + field, Add overlay pre-check in handle_key (update.rs:60-79), ?->Cheatsheet + any-key/esc dismiss, render cheatsheet from keymap_for (clone of ConfirmDestroy modal view.rs:409-468), Create tests/tui_bundle1.rs]
+    files: [src/tui/model.rs, src/tui/update.rs, src/tui/view.rs, tests/tui_bundle1.rs]
+    depends: [T1]
+    acceptance: [AC-CHEAT-1, AC-CHEAT-2, AC-REBIND-2]
+    verifier: make build; make test
+    risk_tags: [P1]   # R-10 esc precedence
+  - id: T3
+    title: "Fuzzy filter overlay on box list"
+    actor: user
+    capability: "press / and type to narrow the list live"
+    value: "fast box selection in long lists"
+    timebox: 3d
+    coder: vivi
+    action_plan: [Add nucleo-matcher dep gated under tui (D-2), Create src/tui/filter.rs fuzzy_rank, Extend model.rs FilterState + filtered_indices + filter-aware move_up/down, Add / open + handle_key_filter in update.rs, Add .filter() before map in render_list (view.rs:139), Extend tests/tui_bundle1.rs]
+    files: [Cargo.toml, src/tui/filter.rs, src/tui/model.rs, src/tui/update.rs, src/tui/view.rs, tests/tui_bundle1.rs]
+    depends: [T2]
+    acceptance: [AC-FILTER-1, AC-FILTER-2, AC-FILTER-3, AC-FILTER-4, AC-FILTER-5]
+    verifier: make build; make lint-lean; make test
+    risk_tags: [P1]   # R-3 selection desync, R-6 lean dep, R-8 j/k
+  - id: T4
+    title: "Runtime skin switcher (Kraft/Carbon/Blueprint)"
+    actor: user
+    capability: "press t to cycle skins; re-resolves immediately"
+    value: "pick a palette that suits the terminal"
+    timebox: 2d
+    coder: vivi
+    action_plan: [Add Skin enum (next/name) to theme.rs, Add skin axis to Theme::resolve(skin,mode), Add Carbon+Blueprint truecolor/ansi16 tables, NoColor arm ignores skin, Add skin field to model + global t cycle + Info toast, Update view.rs:24 resolve call, Generalize nocolor invariant test over all skins]
+    files: [src/tui/theme.rs, src/tui/model.rs, src/tui/update.rs, src/tui/view.rs, src/tui/strings.rs, tests/tui_theme.rs]
+    depends: [T2]
+    acceptance: [AC-SKIN-1, AC-SKIN-NOCOLOR, AC-SKIN-CYCLE]
+    verifier: make build; make test
+    risk_tags: [P0]   # R-4 nocolor invariant per skin
+  - id: T5
+    title: "Toast notification queue (additive over StatusLine)"
+    actor: user
+    capability: "see transient success/info/error toasts that auto-expire"
+    value: "richer feedback without losing the status line"
+    timebox: 3d
+    coder: vivi
+    action_plan: [Add Toast/ToastKind to model.rs + toasts field, Add set_status_ok/error + push_toast helpers, Refactor ~15 completion handlers to call helpers (preserve StatusLine variant), Expire on Tick (retain), Stacked render region, Extend tests]
+    files: [src/tui/model.rs, src/tui/update.rs, src/tui/view.rs, tests/tui_update.rs, tests/tui_bundle1.rs]
+    depends: [T2]
+    acceptance: [AC-TOAST-1, AC-TOAST-2, AC-TOAST-3, AC-TOAST-4]
+    verifier: make test
+    risk_tags: [P0]   # R-1 StatusLine regression
+  - id: T6
+    title: "Command-log echo (bounded ring + overlay, no undo)"
+    actor: user
+    capability: "press l to see the real distrobox/podman commands cbox ran"
+    value: "transparency about what executed; honest no-undo"
+    timebox: 3d
+    coder: vivi
+    action_plan: [Create src/tui/cmdlog.rs CmdLog ring + CmdLogEntry, Create LoggingRunner decorator, Wire shared Arc<Mutex<CmdLog>> in app::run + spawn_worker, Add cmdlog handle to Model, Overlay::CommandLog render + l open + scroll, Honest copy consts in strings.rs]
+    files: [src/tui/cmdlog.rs, src/tui/model.rs, src/tui/app.rs, src/tui/update.rs, src/tui/view.rs, src/tui/strings.rs, tests/tui_bundle1.rs]
+    depends: [T2, T1]
+    acceptance: [AC-CMDLOG-1, AC-CMDLOG-2, AC-CMDLOG-3, AC-CMDLOG-4, AC-CMDLOG-5]
+    verifier: make build; make test
+    risk_tags: [P1]   # R-5 send+sync/mutex, R-7 copy voice
+
+execution_plan:
+  order: [K1, T1, T2, T3, T4, T5, T6, FINAL]
+  parallelizable: [T3, T4, T5, T6]   # siblings off T2 (T6 also needs T1)
+  final_gate: make check
+
+validation_gates:
+  G-BUILD: make build
+  G-LEAN: make lint-lean
+  G-FMT: make fmt-check
+  G-LINT: make lint
+  G-TEST: make test
+  G-INVARIANT: "AC-SKIN-NOCOLOR — every skin x every field NoColor fg/bg None"
+  G-COEXIST: "AC-TOAST-2 + unchanged tests/tui_update.rs StatusLine assertions"
+  G-FINAL: make check
+
+risk_register:
+  - { id: R-1, risk: "toast refactor regresses StatusLine tests", severity: P0, mitigation: "additive helpers preserve status=Ok/Error; AC-TOAST-2 + make test" }
+  - { id: R-2, risk: "?->D rebind leaves stale failing test", severity: P0, mitigation: "K1 migrates test in same task; AC-REBIND-1/2" }
+  - { id: R-3, risk: "filter desyncs selection (out-of-range)", severity: P1, mitigation: "selection via matches[cursor]; clamp on recompute; selected_box .get() safe" }
+  - { id: R-4, risk: "new skin leaks color into NoColor", severity: P0, mitigation: "NoColor arm skin-independent; AC-SKIN-NOCOLOR loops all skins" }
+  - { id: R-5, risk: "LoggingRunner Send+Sync break / mutex contention", severity: P1, mitigation: "inner Arc<dyn DistroboxRunner> keeps Send+Sync (compile-checked); lock only for push" }
+  - { id: R-6, risk: "nucleo-matcher leaks into lean build", severity: P1, mitigation: "gate dep + fuzzy module under tui; make lint-lean must pass" }
+  - { id: R-7, risk: "new strings consts trip AC-COPY-1", severity: P1, mitigation: "add consts to list; verb-driven honest copy" }
+  - { id: R-8, risk: "can't type j/k into filter query", severity: P2, mitigation: "j/k = TEXT in FilterInput; nav via arrows" }
+  - { id: R-9, risk: "Tick-based TTL is wall-clock-imprecise", severity: P2, mitigation: "accepted for transient toasts; documented" }
+  - { id: R-10, risk: "esc quits app instead of closing overlay", severity: P1, mitigation: "overlay/filter pre-check before screen dispatch; AC-CHEAT-1/AC-CMDLOG-5/AC-FILTER-4" }
+
+flagged_decisions:
+  - { id: D-1, topic: "keymap vs strings::HELP", default: "replace HELP with keymap::help_line; voice-assert keymap actions", blocking: false }
+  - { id: D-2, topic: "fuzzy dep gating", default: "nucleo-matcher optional, under tui feature", blocking: false }
+  - { id: D-3, topic: "skin names/palettes", default: "Kraft + Carbon + Blueprint", blocking: false, product_signoff_invited: true }
+  - { id: D-4, topic: "skin key t / command-log key l", default: "t=skin, l=log (both unbound on List)", blocking: false }
+
+confidence_factors:
+  pattern_match: 0.95
+  requirement_clarity: 0.90
+  decomposition_stability: 0.85
+  constraint_compliance: 0.90
+  aggregate: 0.88
+
+agent_hints:
+  recommended_class: builder
+  context_files:
+    - .spectra/plans/2026-06-19-tui-bundle1-retro-cockpit.md
+    - src/tui/model.rs
+    - src/tui/update.rs
+    - src/tui/view.rs
+    - src/tui/theme.rs
+    - src/tui/strings.rs
+    - src/tui/effect.rs
+    - src/tui/app.rs
+    - src/dbox/runner.rs
+    - src/dbox/real.rs
+    - src/dbox/mock.rs
+    - tests/tui_update.rs
+    - tests/tui_theme.rs
+  reminders:
+    - "Containerized: make targets only, never host cargo"
+    - "Preserve NoColor invariant per skin (P0)"
+    - "Preserve StatusLine variant assertions in tests/tui_update.rs (P0)"
+    - "Migrate doctor_question_mark_opens_panel in K1 (P0)"
+    - "Add every new strings const to AC-COPY-1 banned-adjective check"
+    - "Filter must never mutate model.boxes"

@@ -31,6 +31,7 @@ mod inner {
     use crate::dbox::backend::Backend;
     use crate::dbox::runner::DistroboxRunner;
     use crate::error::CboxError;
+    use crate::tui::cmdlog::{CmdLog, LoggingRunner};
     use crate::tui::effect::{execute_effect, make_store, Effect};
     use crate::tui::message::{Key, Message};
     use crate::tui::model::Model;
@@ -327,13 +328,23 @@ mod inner {
         // The TUI has no explicit --no-color flag today; NO_COLOR env + TTY gate suffice.
         let color_mode = crate::tui::theme::detect(false);
 
+        // Build the shared command-log ring buffer (cap 200).
+        // The same Arc is given to the LoggingRunner decorator (writer) and the Model (reader).
+        let cmdlog = Arc::new(std::sync::Mutex::new(CmdLog::new(200)));
+
+        // Wrap the injected runner in the LoggingRunner decorator so every spawn
+        // is captured at the single chokepoint (DistroboxRunner::run / run_interactive).
+        let logging_runner: Arc<dyn DistroboxRunner> =
+            Arc::new(LoggingRunner::new(runner, Arc::clone(&cmdlog)));
+
         // backends is non-empty (Backend::usable guarantees it); [0] is the
         // preferred engine used as the default for creating new boxes.
         let mut model = Model::new(backends[0].clone());
         model.backends = backends;
         model.color_mode = color_mode;
+        model.cmdlog = cmdlog;
 
-        run_loop(model, runner, &mut terminal)
+        run_loop(model, logging_runner, &mut terminal)
     }
 
     pub fn stdout_is_tty() -> bool {
