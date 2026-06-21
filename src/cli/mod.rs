@@ -6,6 +6,7 @@ pub mod create;
 pub mod doctor;
 pub mod edit;
 pub mod enter;
+pub mod export;
 pub mod inspect;
 pub mod list;
 pub mod output;
@@ -144,6 +145,9 @@ pub enum Commands {
 
     /// Manage secrets stored in the OS keyring.
     Secret(secret::SecretArgs),
+
+    /// Surface a box's app, binary, or service onto the host (distrobox-export).
+    Export(export::ExportArgs),
 
     /// Launch the terminal cockpit.
     Tui(tui_cmd::TuiArgs),

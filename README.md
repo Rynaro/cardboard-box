@@ -558,7 +558,29 @@ Prints the plan (which steps would SKIP or RUN, which fields differ) without exe
 
 **Secrets via keyring.** Declare secrets in `[secrets]` (KEY names only; values live in the OS keyring, never the Boxfile). Use `cbox secret set <BOX> <KEY>` to store values. `persist = true` keeps them in the box's persistent env (visible to `podman inspect` from the host); `persist = false` injects them only during provision steps. The keyring must be available and unlocked; if it's not, `cbox up`/`apply` exits 75 and changes nothing.
 
-**No distrobox-export yet.** v1.0 focuses on the box itself. `distrobox-export` integration is a future feature.
+**Surfacing apps, binaries, and services onto the host.** `cbox export` wraps `distrobox-export` by exec'ing into the named box. The box must have been created by distrobox (cbox always does); distrobox auto-starts a stopped box on export.
+
+```
+# Surface a GUI app as a host .desktop launcher
+cbox export dev --app firefox
+
+# Surface a binary as a host wrapper script (--to sets the destination dir)
+cbox export dev --bin /usr/bin/htop --to ~/.local/bin
+
+# Surface a systemd service
+cbox export dev --service nginx
+
+# Remove a previously-exported app
+cbox export dev --app firefox --delete
+
+# See what is currently exported from the box
+cbox export dev --list-apps
+cbox export dev --list-bins
+```
+
+Exports are **imperative**: re-run the command after a `cbox rm` + `cbox create` to re-surface resources. Host `.desktop` files and wrapper scripts created by previous exports are not auto-cleaned when a box is removed — run `cbox export <BOX> --app <NAME> --delete` before removing the box if you want a clean host.
+
+Deferred flags (`--export-label`, `--extra-flags`, `--sudo`): use `cbox enter <box> -- distrobox-export …` as an escape hatch until they ship.
 
 **Inserting provision steps shifts indices.** The idempotency key is `(index, content-hash)`. Inserting a step in the middle shifts downstream indices → those steps re-run. This is by design and acceptable because provisioning steps should be idempotent (Vagrant-style contract).
 

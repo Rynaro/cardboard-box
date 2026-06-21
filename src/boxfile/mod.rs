@@ -23,6 +23,7 @@ pub fn parse_and_validate(toml_text: &str) -> Result<(Boxfile, Vec<String>), Cbo
         "provision",
         "secrets",
         "env",
+        "exports", // D1 reserve: parsed-but-not-acted-on (v6.0); no struct/diff/apply
     ];
 
     let mut warnings = Vec::new();

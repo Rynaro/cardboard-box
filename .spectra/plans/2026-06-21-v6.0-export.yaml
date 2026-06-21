@@ -1,0 +1,176 @@
+spec_id: 2026-06-21-v6.0-export
+title: "cbox v6.0 — cbox export (distrobox-export integration)"
+status: DECISION_READY
+decision: VALIDATE              # 5 scope decisions go to maintainer before AUTO_PROCEED
+confidence: 0.84
+intent: CHANGE
+complexity: 8
+tier: standard
+author: spectra
+executor: vivi
+build:
+  containerized: true
+  commands: ["make test", "make check"]
+  never: "bare cargo on host"
+  feature_matrix: ["default(tui)", "--no-default-features (lean)", "testkit"]
+
+gap_closed:
+  readme: "README.md:561 — 'No distrobox-export yet … future feature' (verified)"
+  v1_spec: "docs/specs/v1.0-cli-lifecycle.md:72 — deferred 'distrobox-export app integration' (verified)"
+  diff_anchor: "src/core/diff.rs:302 — /usr/bin/distrobox-export already recognized as injected binary (verified)"
+
+mechanism:
+  fact: "distrobox-export runs INSIDE the box; cbox runs on the HOST"
+  exec_shape: 'distrobox enter --name <BOX> -- distrobox-export <subflags>'
+  identical_to: "build_provision_shell_argv (argv.rs:219) / core::enter (mod.rs:557); RunMode::Capture"
+  mock_testable: "MockRunner RecordedCall {program,args,env} (mock.rs:11); zero real distrobox, zero host writes"
+  no_new_dep: true
+  no_new_exit_code: true
+
+scope_decisions:                # the 5 maintainer-owned forks (recommendation + rationale + risk)
+  D1_declarative_vs_imperative:
+    recommend: "imperative-only in v6.0; RESERVE [[exports]] allowlist key, do NOT implement diff/apply"
+    rationale: "declarative idempotency is hard+truthfulness-risky (host files not verifiable from guest exec, box.home blind-spot risk); imperative delivers value now with small mock-testable surface; reserving allowlist key is free forward-compat"
+    risk_if_wrong: "users expect cbox up to re-surface apps after recreate; if demand strong -> v6.1 declarative via §8 seam (additive, no rework)"
+    reshapes_plan: true         # the ONE fork that is not additive to the recommended cut
+  D2_command_surface:
+    recommend: "ship --app, --bin(+--to), --service, --delete, --list-apps, --list-bins; DEFER --export-label, --extra-flags, --sudo"
+    rationale: "5 target modes + --delete cover the full surface/remove/inspect loop; --to(=--export-path) NOT deferrable (distrobox-export requires it for --bin); the 3 deferred flags are refinements + raw-passthrough risk"
+    risk_if_wrong: "user needs --sudo in v6.0 -> escape hatch 'cbox enter <box> -- distrobox-export …'; v6.1 adds additively"
+  D3_direction_semantics:
+    recommend: "box->host only (the surfacing direction distrobox-export implements); --delete + list operate on the box's own exports; cbox does NOT own a host-side registry"
+    rationale: "only honest semantics — helper does the work, cbox is the host-side front door + precondition/error shaping"
+    risk_if_wrong: "orphaned host launchers after cbox rm (documented RR-3; possible future cbox export prune)"
+  D4_output_exit:
+    recommend: "human default + --json (ExportOutcome); map failures onto EXISTING taxonomy, no new codes"
+    map:
+      box_not_found: 69          # CboxError::box_not_found (same as apply/inspect)
+      export_helper_missing: 70  # CboxError::software (cbox-authored msg) — F2
+      app_or_helper_error: 125   # CboxError::backend_error (helper stderr-tail) — F3
+      bad_usage: 64              # CboxError::usage (no/two targets, --to w/o --bin, --delete w/ list) — F5
+      backend_unreachable: 125   # via RunnerError / backend_error — F4
+    risk_if_wrong: "reviewer may prefer uniform 125 for F2; one-line change to drop the F2 stderr-substring branch"
+  D5_idempotency:
+    recommend: "N/A under recommended imperative cut; rely on distrobox-export's own idempotency; document safe re-run"
+    if_declarative: "value-free exports_fingerprint in ProvisionState (serde default, v5.0 pattern); MUST be checked AND read back (box.home/boxfile_sha anti-pattern guard); DiffField{field:exports,class:Incremental}; HONESTY CAVEAT — fingerprint tracks DECLARED intent not host reality (why D1 defers)"
+    risk_if_wrong: "duplicate launcher on re-run (not observed; helper overwrites)"
+
+command_surface:
+  subcommand: "Export(export::ExportArgs)"
+  positional: "<BOX> (required; no implicit current box)"
+  target_group: "ArgGroup required=true multiple=false over: --app, --bin, --service, --list-apps, --list-bins"
+  modes:
+    app:     'cbox export <BOX> --app <APPNAME> [--delete]'
+    bin:     'cbox export <BOX> --bin <GUEST_PATH> [--to <HOSTDIR>] [--delete]'
+    service: 'cbox export <BOX> --service <NAME> [--delete]'
+    list_apps: 'cbox export <BOX> --list-apps'
+    list_bins: 'cbox export <BOX> --list-bins'
+  flag_rules:
+    delete: "modifier on --app/--bin/--service; forbidden with list modes (exit 64)"
+    to: "maps to distrobox-export --export-path; ONLY valid with --bin (exit 64 otherwise); omitted -> no --export-path passed (helper requires it for --bin -> F3 if missing)"
+  global_flags_honored: ["--json", "-q/--quiet", "--no-color", "-v", "--dry-run", "--backend"]
+
+argv_builders:                  # new in src/dbox/argv.rs (one per concrete call shape — existing idiom)
+  - 'build_export_app_argv(name, app, delete) -> [enter,--name,N,--,distrobox-export,--app,APP,(--delete)]'
+  - 'build_export_bin_argv(name, bin, to, delete) -> [..,distrobox-export,--bin,PATH,(--export-path,DIR),(--delete)]'
+  - 'build_export_service_argv(name, service, delete) -> [..,distrobox-export,--service,NAME,(--delete)]'
+  - 'build_export_list_apps_argv(name) -> [..,distrobox-export,--list-apps]'
+  - 'build_export_list_bins_argv(name) -> [..,distrobox-export,--list-binaries]'
+  order: "target flag, then value, then --delete last for mutating forms; deterministic for unit assertions"
+
+spec_types:                     # src/core/spec.rs
+  ExportTarget: "enum { App{name}, Bin{path,to:Option<String>}, Service{name}, ListApps, ListBins }"
+  ExportSpec: "{ box_name, target: ExportTarget, delete: bool, backend: Backend, dry_run: bool }"
+  ExportOutcome: "{ ok, action(export|export-delete|export-list), box_name, mode, target:Option<String>, deleted, entries:Vec<String>, detail }"
+
+core_export_flow:               # src/core/mod.rs pub fn export(spec, runner)
+  - "1. backend pre-pinned by CLI via resolve_backend (mod.rs:348)"
+  - "2. existence precondition via inspect(); UNAVAILABLE(69) -> box_not_found (re-raise); do NOT hard-fail on stopped box (A2: distrobox auto-starts on enter)"
+  - "3. build argv via §1.3 builder selected by target+delete"
+  - "4. run Invocation::new(distrobox,args,Capture).with_env([backend.dbx_env()]); dry_run -> RunMode::DryRun (print argv, no spawn)"
+  - "5. map success (§2.3) / failure (§2.4)"
+
+failure_map:
+  F1: {failure: "box does not exist", detect: "inspect -> UNAVAILABLE", maps: box_not_found, exit: 69, no_export_call: true}
+  F2: {failure: "distrobox-export missing in box", detect: "exit!=0 AND stderr contains distrobox-export + (not found|No such file|command not found)", maps: software, exit: 70, msg: "distrobox-export isn't available inside <BOX> … See: cbox doctor"}
+  F3: {failure: "app/bin/service not found OR --export-path missing OR any other helper error", detect: "exit!=0 (catch-all, after F2)", maps: backend_error, exit: 125}
+  F4: {failure: "backend unreachable / box won't start", detect: "RunnerError or refused/cannot connect stderr", maps: "backend_error / RunnerError", exit: "125 / via RunnerError"}
+  F5: {failure: "bad usage (no/two targets, --to w/o --bin, --delete w/ list)", detect: "clap ArgGroup + cli/export.rs guards", maps: usage, exit: 64}
+
+acceptance:
+  - {id: AC-EXP-1, gwt: "--app -> args==[enter,--name,dev,--,distrobox-export,--app,firefox]; outcome action=export mode=app target=firefox"}
+  - {id: AC-EXP-2, gwt: "--app --delete -> args end …--app,firefox,--delete; action=export-delete deleted=true"}
+  - {id: AC-EXP-3, gwt: "--bin --to -> args …--bin,/usr/bin/htop,--export-path,/home/u/.local/bin"}
+  - {id: AC-EXP-4, gwt: "--bin without --to -> args have --bin but NOT --export-path"}
+  - {id: AC-EXP-5, gwt: "--service -> args …distrobox-export,--service,nginx"}
+  - {id: AC-EXP-6, gwt: "--list-apps stdout 'firefox\\ngimp\\n' -> entries==[firefox,gimp] action=export-list target=None"}
+  - {id: AC-EXP-7, gwt: "--list-bins mirrors AC-EXP-6 with --list-binaries"}
+  - {id: AC-EXP-8, gwt: "box absent (inspect=[]) -> exit 69; recorded calls have inspect but NO distrobox-export call"}
+  - {id: AC-EXP-9, gwt: "exec err(127,'distrobox-export: command not found') -> exit 70; msg has 'distrobox-export isn't available' + 'cbox doctor'"}
+  - {id: AC-EXP-10, gwt: "exec err(1,'… application firefox not found') -> exit 125; stderr-tail has 'not found'"}
+  - {id: AC-EXP-11, gwt: "--bin to:None, exec err(1,'--export-path is required') -> exit 125; tail mentions export-path (no invented default dir)"}
+  - {id: AC-EXP-12, gwt: "CLI usage: no target / two targets / --to w/o --bin / --delete w/ list -> exit 64 (assert_cmd)"}
+  - {id: AC-EXP-13, gwt: "--json mutating: ok,action=export,mode=app,target=firefox,deleted=false,entries=[]; --json list: entries array, target=null"}
+  - {id: AC-EXP-14, gwt: "--dry-run prints enter…distrobox-export argv; no captured export spawn (DryRun)"}
+  - {id: AC-EXP-15, gwt: "bad box name '../evil' -> exit 64 before any runner call"}
+  - {id: AC-EXP-16, gwt: "backend=Podman -> recorded call env has DBX_CONTAINER_MANAGER pin (backend.dbx_env, like core::enter mod.rs:560)"}
+
+file_touch_map:
+  new:
+    src/cli/export.rs: "ExportArgs (clap ArgGroup), inter-flag guards, run(), human/--json rendering"
+  changed:
+    src/cli/mod.rs: "pub mod export; + Export(export::ExportArgs) variant after Secret"
+    src/main.rs: "dispatch arm Commands::Export => export::run (real runner, ctx, globals; no SecretStore/StateStore)"
+    src/dbox/argv.rs: "5 build_export_*_argv builders + #[cfg(test)] unit tests"
+    src/core/spec.rs: "ExportTarget enum, ExportSpec, ExportOutcome"
+    src/core/mod.rs: "pub fn export(spec,runner) -> Result<ExportOutcome,CboxError>; existence precondition; argv dispatch; F1-F4 mapping"
+    src/cli/output.rs: "optional render_export human formatter (or inline in cli/export.rs, secret.rs style)"
+    src/boxfile/mod.rs: "add 'exports' to known_top_level allowlist (D1 reserve; NO struct/validation)"
+    README.md: "replace L561 'No distrobox-export yet' with demonstrated export section + caveats"
+    docs/specs/v1.0-cli-lifecycle.md: "strike 'distrobox-export app integration' from deferred list L72 + back-ref"
+  new_tests:
+    tests/export.rs: "AC-EXP-1..16 (argv shapes via MockRunner; F1/F2/F3 exit codes; usage exit-64 via assert_cmd; --json; --dry-run; backend pin)"
+  in_module_tests:
+    "src/dbox/argv.rs": "exact builder token vectors (AC-EXP-1/2/3/4/5)"
+    "src/core/mod.rs": "export dispatch + failure mapping (AC-EXP-6/8/9/10/11/16)"
+
+implementation_order:
+  - "1. spec types (core/spec.rs: ExportTarget, ExportSpec, ExportOutcome) — pure"
+  - "2. argv builders (dbox/argv.rs x5) + in-module unit tests (AC-EXP-1/2/3/4/5) — pure"
+  - "3. core::export (core/mod.rs): inspect precondition, argv dispatch, success+F1/F2/F3/F4 + fn-level tests (AC-EXP-6/8/9/10/11/16)"
+  - "4. CLI (cli/export.rs ArgGroup+guards+run+render) + register cli/mod.rs + dispatch main.rs + tests/export.rs assert_cmd (AC-EXP-12/13/14/15)"
+  - "5. allowlist reserve (boxfile/mod.rs: add 'exports') — one line"
+  - "6. docs (README L561 rewrite; v1.0 spec L72) — demonstrate, don't advertise"
+  - "7. make check (fmt + clippy both feature configs + build + release + test); confirm lean (--no-default-features) compiles (export not tui-gated)"
+
+agent_hints:
+  agent_class: "Builder (speed) for 1,2,5,6; Reasoner (reasoning) for 3,4 (precondition-vs-passthrough failure mapping; clap ArgGroup + inter-flag guards)"
+  validation_gates: ["G-MOCK", "G-NO-NET", "G-EXIT (64/69/70/125)", "G-JSON", "G-DRYRUN", "G-FEATURE-MATRIX (lean+tui)", "make check"]
+  context_files:
+    - "src/dbox/argv.rs (build_provision_shell_argv:219, build_enter_argv, build_copy_argv — argv idiom)"
+    - "src/dbox/runner.rs (Invocation, RunMode::{Capture,DryRun}, with_env, DistroboxRunner)"
+    - "src/dbox/mock.rs (RecordedCall {program,args,env}, MockMatcher, call_count)"
+    - "src/core/mod.rs (enter:557 backend.dbx_env pin; inspect:567 precondition; apply:1135 box_not_found pattern; resolve_backend:348)"
+    - "src/core/spec.rs (ApplyOutcome/DiffResult shape to mirror; EnterSpec)"
+    - "src/error.rs (exit taxonomy 64/65/69/70/74/75/125; box_not_found; software; backend_error:135; usage)"
+    - "src/cli/secret.rs (CLI handler + --json + list-line rendering style)"
+    - "src/cli/enter.rs (is_valid_name guard, backend resolve, run signature)"
+    - "src/cli/mod.rs (Commands enum registration), src/main.rs (dispatch)"
+    - "src/boxfile/mod.rs (known_top_level allowlist:15)"
+
+residual_risk:
+  OQ-1: "Decisions 1-5 go to maintainer BEFORE execution; recommended cut = imperative(D1)/5-mode(D2)/box->host(D3)/§2.4 exit map(D4)/helper-idempotency(D5). ONLY D1->declarative reshapes the file-touch map (adds serde struct+validation+diff field+apply wiring+§8 fingerprint)"
+  OQ-2: "F2 vs F3 exit code: 70 (missing helper) vs 125 (app-not-found). If maintainer prefers uniform 125, drop F2 stderr-substring branch (one line). Default = 70/125 split"
+  RR-1: "distrobox-export --list-* output format may carry decoration across versions; parse conservatively (split/trim/drop-empty) + show raw detail; eyeball one real --list-apps in manual #[ignore] smoke, not CI"
+  RR-2: "stopped box pays cold-start on enter (same as enter/provision); no timeout added (plain run, not run_with_timeout)"
+  RR-3: "cbox rm does NOT clean host .desktop/wrapper files (no host-side registry — D3); documented honestly; future cbox export prune"
+  RR-4: "--extra-flags/--sudo deferred (D2); escape hatch 'cbox enter <box> -- distrobox-export …'; v6.1 additive"
+
+confidence_factors:
+  pattern_match: 0.92
+  requirement_clarity: 0.86
+  decomposition_stability: 0.84
+  constraint_compliance: 0.84
+  aggregate: 0.84
+  decision: VALIDATE
+  note: "decision-ready; held at VALIDATE (not AUTO_PROCEED) because 5 scope decisions are maintainer-owned. Recommended cut -> immediate execute; D1->declarative -> apply §8 additive delta -> AUTO_PROCEED"
