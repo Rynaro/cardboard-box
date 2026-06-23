@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/Rynaro/cardboard-box/compare/v0.11.0...v0.12.0) (2026-06-23)
+
+
+### Features
+
+* **export:** add cbox export command (distrobox-export integration) ([#36](https://github.com/Rynaro/cardboard-box/issues/36)) ([e4871d0](https://github.com/Rynaro/cardboard-box/commit/e4871d0b08277feb72a3e5ca5bbeb9379d2d4fd8))
+
 ## [0.11.0](https://github.com/Rynaro/cardboard-box/compare/v0.10.0...v0.11.0) (2026-06-20)
 
 
