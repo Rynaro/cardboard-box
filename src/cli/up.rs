@@ -62,6 +62,11 @@ pub struct UpArgs {
     #[arg(long)]
     pub pull: bool,
 
+    /// Fully isolate from the host: private $HOME + process/ipc namespaces, so
+    /// host shell config and apps don't bleed into the box.
+    #[arg(long)]
+    pub isolated: bool,
+
     // Apply flags
     /// Re-run all provision steps, ignoring stored hashes.
     #[arg(long)]
@@ -197,6 +202,29 @@ pub fn run_with_store(
             "NAME is required unless --file is provided or a Boxfile.toml exists in the current directory.",
         ));
     };
+
+    // Isolation: from the Boxfile `[box] isolated` OR the --isolated flag. An
+    // explicit home (Boxfile or --home) always wins (apply_isolation is idempotent
+    // and only synthesizes a home when none was set).
+    let isolated = resolved_bf
+        .as_ref()
+        .map(|b| b.box_config.isolated)
+        .unwrap_or(false)
+        || args.isolated;
+    if isolated {
+        let nm = create_spec.name.clone();
+        core::apply_isolation(&mut create_spec, &nm);
+        // distrobox won't create a custom --home whose parent dirs don't exist
+        // (podman/crun fails to bind-mount a missing source). The synthesized XDG
+        // path lives several levels deep, so create it before the box.
+        if !global_dry_run {
+            if let Some(home) = create_spec.home.as_deref().filter(|h| !h.is_empty()) {
+                std::fs::create_dir_all(home).map_err(|e| {
+                    CboxError::ioerr(format!("Cannot create isolated home {home}: {e}"))
+                })?;
+            }
+        }
+    }
 
     // ── Secret resolution — ALL-OR-NOTHING before any spawn (D3) ────────────
     // persist=true: bake into Config.Env at create time.

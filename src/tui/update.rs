@@ -397,6 +397,7 @@ fn handle_key_detail(model: &mut Model, key: Key) -> Vec<Effect> {
                         root: false,
                         clean_path: false,
                         cmd: vec![],
+                        home_landing: true,
                         backend: backend_of(&detail.backend, &model.backend),
                     };
                     vec![Effect::SuspendAndEnter(spec)]
@@ -1210,6 +1211,7 @@ fn open_selected(model: &mut Model) -> Vec<Effect> {
                 root: false,
                 clean_path: false,
                 cmd: vec![],
+                home_landing: true,
                 backend: backend_of(&row.backend, &model.backend),
             };
             vec![Effect::SuspendAndEnter(spec)]

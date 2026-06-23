@@ -19,6 +19,10 @@ pub struct EnterArgs {
     #[arg(long)]
     pub clean_path: bool,
 
+    /// Stay in the current directory instead of landing in the box's home.
+    #[arg(long)]
+    pub no_home: bool,
+
     /// Command to run inside the box (after --).
     #[arg(last = true, value_name = "CMD")]
     pub cmd: Vec<String>,
@@ -53,6 +57,8 @@ pub fn run(
         root: args.root,
         clean_path: args.clean_path,
         cmd: args.cmd.clone(),
+        // Land in the box home by default; disabled by --no-home or an explicit cmd.
+        home_landing: !args.no_home && args.cmd.is_empty(),
         backend,
     };
 

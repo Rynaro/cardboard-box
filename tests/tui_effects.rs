@@ -156,6 +156,7 @@ fn ac_eff_enter_is_interactive() {
         root: false,
         clean_path: false,
         cmd: vec![],
+        home_landing: true,
         backend: Backend::Podman,
     };
 
@@ -186,6 +187,7 @@ fn ac_eff_suspend_enter_returns_none() {
         root: false,
         clean_path: false,
         cmd: vec![],
+        home_landing: true,
         backend: Backend::Podman,
     };
     let result = execute_effect(

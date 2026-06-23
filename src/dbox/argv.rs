@@ -77,10 +77,13 @@ pub fn build_create_argv(spec: &CreateSpec) -> Vec<String> {
         match unshare.as_str() {
             "all" => args.push("--unshare-all".into()),
             _ => {
-                // space or comma-separated list
-                for item in unshare.split_whitespace().chain(unshare.split(',')) {
+                // Space- OR comma-separated list. Split on either delimiter and
+                // dedupe so a multi-item value like "netns ipc" yields two clean
+                // `--unshare-<ns>` flags (never a malformed combined token).
+                let mut seen = std::collections::BTreeSet::new();
+                for item in unshare.split(|c: char| c.is_whitespace() || c == ',') {
                     let item = item.trim();
-                    if !item.is_empty() && item != "all" {
+                    if !item.is_empty() && item != "all" && seen.insert(item.to_string()) {
                         args.push(format!("--unshare-{item}"));
                     }
                 }
@@ -157,8 +160,21 @@ pub fn build_enter_argv(spec: &EnterSpec) -> Vec<String> {
         args.push("--clean-path".into());
     }
     if !spec.cmd.is_empty() {
+        // Explicit command always wins; run it verbatim (no home redirect).
         args.push("--".into());
         args.extend(spec.cmd.iter().cloned());
+    } else if spec.home_landing {
+        // No explicit command: drop the user in the box's own $HOME instead of
+        // inheriting the host working directory. distrobox preserves the caller's
+        // CWD on enter, so we cd in-shell (works regardless of distrobox's CWD
+        // handling) and exec a login shell. $HOME is whatever distrobox set for
+        // this box — the host home for shared boxes, the private path for isolated
+        // ones. We bootstrap via POSIX `sh` (always present) and exec the user's
+        // own shell so we don't assume bash.
+        args.push("--".into());
+        args.push("sh".into());
+        args.push("-lc".into());
+        args.push(r#"cd "$HOME"; exec "${SHELL:-/bin/sh}" -l"#.into());
     }
     args
 }

@@ -186,6 +186,12 @@ pub struct BoxConfig {
     pub hostname: String,
     #[serde(default)]
     pub pull: bool,
+    /// When true, the box gets a private `$HOME` (default
+    /// `$XDG_DATA_HOME/cbox/homes/<name>`) plus process/ipc namespace isolation,
+    /// so host shell dotfiles and installed apps do not bleed into the box.
+    /// An explicit `home` (or `--home`) takes precedence over the synthesized path.
+    #[serde(default)]
+    pub isolated: bool,
 }
 
 /// A provisioning step (P1: parse+validate only).
