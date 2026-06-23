@@ -12,9 +12,11 @@ use std::time::Duration;
 
 use crate::dbox::{
     argv::{
-        build_create_argv, build_dbox_list_argv, build_enter_argv, build_inspect_argv,
-        build_list_argv, build_logs_argv, build_pkg_probe_argv, build_provision_shell_argv,
-        build_rm_argv, build_stats_argv, build_stop_argv,
+        build_create_argv, build_dbox_list_argv, build_enter_argv, build_export_app_argv,
+        build_export_bin_argv, build_export_list_apps_argv, build_export_list_bins_argv,
+        build_export_service_argv, build_inspect_argv, build_list_argv, build_logs_argv,
+        build_pkg_probe_argv, build_provision_shell_argv, build_rm_argv, build_stats_argv,
+        build_stop_argv,
     },
     backend::Backend,
     runner::{DistroboxRunner, Invocation, RunMode},
@@ -23,9 +25,9 @@ use crate::error::CboxError;
 use secret_inject::{build_env_keys, build_secret_specs, env_secret_fingerprint};
 use spec::{
     ApplyOutcome, ApplySpec, ApplySummary, BackendInfo, BackendStatus, BoxRow, CreateSpec,
-    DiffResult, DistroboxInfo, DoctorResult, DoctorSpec, EditSpec, EnterSpec, InspectResult,
-    InspectSpec, KeyringStatus, MountResult, ProvisionStepResult, RmSpec, StatsSample, StatsSpec,
-    StopSpec, UpOutcome, UpSpec,
+    DiffResult, DistroboxInfo, DoctorResult, DoctorSpec, EditSpec, EnterSpec, ExportOutcome,
+    ExportSpec, ExportTarget, InspectResult, InspectSpec, KeyringStatus, MountResult,
+    ProvisionStepResult, RmSpec, StatsSample, StatsSpec, StopSpec, UpOutcome, UpSpec,
 };
 use state_store::{ProvisionState, ProvisionStateStore};
 
@@ -560,6 +562,140 @@ pub fn enter(spec: &EnterSpec, runner: &dyn DistroboxRunner) -> Result<i32, Cbox
         .with_env(vec![spec.backend.dbx_env()]);
     let code = runner.run_interactive(inv)?;
     Ok(code)
+}
+
+// ─── export ──────────────────────────────────────────────────────────────────
+
+/// Exec `distrobox enter --name <BOX> -- distrobox-export <flags>` (imperative, D1).
+///
+/// Precondition: box must exist (checked via `inspect`; absent → exit 69).
+/// Failure mapping:
+///   F1 box absent → exit 69 (`box_not_found`)
+///   F2 distrobox-export missing in box → exit 70 (`software`)
+///   F3 helper non-zero (catch-all after F2) → exit 125 (`backend_error`)
+///   F4 backend unreachable → exit 125 (via `RunnerError`)
+pub fn export(spec: &ExportSpec, runner: &dyn DistroboxRunner) -> Result<ExportOutcome, CboxError> {
+    // 1. Existence precondition (F1: box not found → 69).
+    let inspect_spec = InspectSpec {
+        name: spec.box_name.clone(),
+        raw: false,
+        backend: spec.backend.clone(),
+    };
+    match inspect(&inspect_spec, runner) {
+        Ok(_) => {}
+        Err(e) if e.exit_code() == crate::error::exit::UNAVAILABLE => {
+            return Err(CboxError::box_not_found(&spec.box_name));
+        }
+        Err(e) => return Err(e),
+    }
+
+    // 2. Build argv from target + delete flag.
+    let args = match &spec.target {
+        ExportTarget::App { name } => build_export_app_argv(&spec.box_name, name, spec.delete),
+        ExportTarget::Bin { path, to } => {
+            build_export_bin_argv(&spec.box_name, path, to.as_deref(), spec.delete)
+        }
+        ExportTarget::Service { name } => {
+            build_export_service_argv(&spec.box_name, name, spec.delete)
+        }
+        ExportTarget::ListApps => build_export_list_apps_argv(&spec.box_name),
+        ExportTarget::ListBins => build_export_list_bins_argv(&spec.box_name),
+    };
+
+    // 3. Run (DryRun or Capture).
+    let mode = if spec.dry_run {
+        RunMode::DryRun
+    } else {
+        RunMode::Capture
+    };
+    let inv = Invocation::new("distrobox", args, mode).with_env(vec![spec.backend.dbx_env()]);
+    let out = runner.run(inv)?;
+
+    // 4. Map results.
+    let (mode_str, target_name) = match &spec.target {
+        ExportTarget::App { name } => ("app".to_string(), Some(name.clone())),
+        ExportTarget::Bin { path, .. } => ("bin".to_string(), Some(path.clone())),
+        ExportTarget::Service { name } => ("service".to_string(), Some(name.clone())),
+        ExportTarget::ListApps => ("list-apps".to_string(), None),
+        ExportTarget::ListBins => ("list-bins".to_string(), None),
+    };
+
+    if spec.dry_run {
+        return Ok(ExportOutcome {
+            ok: true,
+            action: if spec.delete {
+                "export-delete".to_string()
+            } else if matches!(spec.target, ExportTarget::ListApps | ExportTarget::ListBins) {
+                "export-list".to_string()
+            } else {
+                "export".to_string()
+            },
+            box_name: spec.box_name.clone(),
+            mode: mode_str,
+            target: target_name,
+            deleted: spec.delete,
+            entries: Vec::new(),
+            detail: out.stdout.trim().to_string(),
+        });
+    }
+
+    if out.status != 0 {
+        // F2: distrobox-export BINARY missing in box → exit 70.
+        // Detection: stderr must mention "distrobox-export" AND one of the "not found" signals.
+        // We check stderr only (not argv — argv always contains "distrobox-export" as an arg).
+        let stderr_lower = out.stderr.to_lowercase();
+        if stderr_lower.contains("distrobox-export")
+            && (stderr_lower.contains("not found")
+                || stderr_lower.contains("no such file")
+                || stderr_lower.contains("command not found"))
+        {
+            return Err(CboxError::software(format!(
+                "distrobox-export isn't available inside \"{}\". \
+                 This box may not be a distrobox-managed box, or its image lacks the distrobox \
+                 integration. See:  cbox doctor",
+                spec.box_name
+            )));
+        }
+        // F3: catch-all helper error → 125.
+        return Err(CboxError::backend_error(out.status, &out.stderr, &out.argv));
+    }
+
+    // Success.
+    let is_list = matches!(spec.target, ExportTarget::ListApps | ExportTarget::ListBins);
+    let action = if is_list {
+        "export-list".to_string()
+    } else if spec.delete {
+        "export-delete".to_string()
+    } else {
+        "export".to_string()
+    };
+
+    let entries = if is_list {
+        out.stdout
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let detail = if is_list {
+        String::new()
+    } else {
+        out.stdout.trim().to_string()
+    };
+
+    Ok(ExportOutcome {
+        ok: true,
+        action,
+        box_name: spec.box_name.clone(),
+        mode: mode_str,
+        target: target_name,
+        deleted: spec.delete,
+        entries,
+        detail,
+    })
 }
 
 // ─── inspect ─────────────────────────────────────────────────────────────────

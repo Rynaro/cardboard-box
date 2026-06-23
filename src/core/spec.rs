@@ -418,6 +418,48 @@ pub struct StatsSample {
     pub mem_limit: u64,
 }
 
+// ─── v6.0 export spec types ──────────────────────────────────────────────────
+
+/// What the user asked export to do (exactly one target).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExportTarget {
+    App { name: String },
+    Bin { path: String, to: Option<String> },
+    Service { name: String },
+    ListApps,
+    ListBins,
+}
+
+/// Spec for `cbox export`.
+#[derive(Debug, Clone)]
+pub struct ExportSpec {
+    pub box_name: String,
+    pub target: ExportTarget,
+    /// Only meaningful for App/Bin/Service; validated in cli/export.rs.
+    pub delete: bool,
+    /// Pins distrobox to the right engine (same as enter/apply).
+    pub backend: Backend,
+    pub dry_run: bool,
+}
+
+/// Outcome of `cbox export` (serialized for --json).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ExportOutcome {
+    pub ok: bool,
+    /// "export" | "export-delete" | "export-list"
+    pub action: String,
+    pub box_name: String,
+    /// "app" | "bin" | "service" | "list-apps" | "list-bins"
+    pub mode: String,
+    /// App/bin/service name; None for list modes.
+    pub target: Option<String>,
+    pub deleted: bool,
+    /// For list modes: the parsed entries distrobox-export reported (one per line).
+    pub entries: Vec<String>,
+    /// distrobox-export's own stdout headline (human echo / provenance).
+    pub detail: String,
+}
+
 fn get_uid() -> u32 {
     #[cfg(unix)]
     unsafe {

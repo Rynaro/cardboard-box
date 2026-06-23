@@ -299,6 +299,88 @@ pub fn escape_single_quotes(s: &str) -> String {
     s.replace('\'', "'\\''")
 }
 
+// ─── v6.0 export argv builders ───────────────────────────────────────────────
+
+/// `distrobox enter --name <NAME> -- distrobox-export --app <APP> [--delete]`
+pub fn build_export_app_argv(name: &str, app: &str, delete: bool) -> Vec<String> {
+    let mut args = vec![
+        "enter".to_string(),
+        "--name".to_string(),
+        name.to_string(),
+        "--".to_string(),
+        "distrobox-export".to_string(),
+        "--app".to_string(),
+        app.to_string(),
+    ];
+    if delete {
+        args.push("--delete".to_string());
+    }
+    args
+}
+
+/// `distrobox enter --name <NAME> -- distrobox-export --bin <PATH> [--export-path <DIR>] [--delete]`
+/// `--export-path` is omitted when `to` is None; `--delete` may omit `--export-path` too.
+pub fn build_export_bin_argv(name: &str, bin: &str, to: Option<&str>, delete: bool) -> Vec<String> {
+    let mut args = vec![
+        "enter".to_string(),
+        "--name".to_string(),
+        name.to_string(),
+        "--".to_string(),
+        "distrobox-export".to_string(),
+        "--bin".to_string(),
+        bin.to_string(),
+    ];
+    if let Some(dir) = to {
+        args.push("--export-path".to_string());
+        args.push(dir.to_string());
+    }
+    if delete {
+        args.push("--delete".to_string());
+    }
+    args
+}
+
+/// `distrobox enter --name <NAME> -- distrobox-export --service <NAME> [--delete]`
+pub fn build_export_service_argv(name: &str, service: &str, delete: bool) -> Vec<String> {
+    let mut args = vec![
+        "enter".to_string(),
+        "--name".to_string(),
+        name.to_string(),
+        "--".to_string(),
+        "distrobox-export".to_string(),
+        "--service".to_string(),
+        service.to_string(),
+    ];
+    if delete {
+        args.push("--delete".to_string());
+    }
+    args
+}
+
+/// `distrobox enter --name <NAME> -- distrobox-export --list-apps`
+pub fn build_export_list_apps_argv(name: &str) -> Vec<String> {
+    vec![
+        "enter".to_string(),
+        "--name".to_string(),
+        name.to_string(),
+        "--".to_string(),
+        "distrobox-export".to_string(),
+        "--list-apps".to_string(),
+    ]
+}
+
+/// `distrobox enter --name <NAME> -- distrobox-export --list-binaries`
+pub fn build_export_list_bins_argv(name: &str) -> Vec<String> {
+    vec![
+        "enter".to_string(),
+        "--name".to_string(),
+        name.to_string(),
+        "--".to_string(),
+        "distrobox-export".to_string(),
+        "--list-binaries".to_string(),
+    ]
+}
+
 /// Build the argv to probe the distro package manager inside the box.
 /// Returns the path of the first found package manager.
 pub fn build_pkg_probe_argv(name: &str) -> Vec<String> {
@@ -312,4 +394,171 @@ pub fn build_pkg_probe_argv(name: &str) -> Vec<String> {
         "-c".to_string(),
         cmd.to_string(),
     ]
+}
+
+#[cfg(test)]
+mod export_argv_tests {
+    use super::*;
+
+    #[test]
+    fn export_app_argv_no_delete() {
+        let args = build_export_app_argv("dev", "firefox", false);
+        assert_eq!(
+            args,
+            &[
+                "enter",
+                "--name",
+                "dev",
+                "--",
+                "distrobox-export",
+                "--app",
+                "firefox"
+            ]
+        );
+    }
+
+    #[test]
+    fn export_app_argv_with_delete() {
+        let args = build_export_app_argv("dev", "firefox", true);
+        assert_eq!(
+            args,
+            &[
+                "enter",
+                "--name",
+                "dev",
+                "--",
+                "distrobox-export",
+                "--app",
+                "firefox",
+                "--delete"
+            ]
+        );
+    }
+
+    #[test]
+    fn export_bin_argv_with_to() {
+        let args = build_export_bin_argv("dev", "/usr/bin/htop", Some("/home/u/.local/bin"), false);
+        assert_eq!(
+            args,
+            &[
+                "enter",
+                "--name",
+                "dev",
+                "--",
+                "distrobox-export",
+                "--bin",
+                "/usr/bin/htop",
+                "--export-path",
+                "/home/u/.local/bin"
+            ]
+        );
+    }
+
+    #[test]
+    fn export_bin_argv_without_to() {
+        let args = build_export_bin_argv("dev", "/usr/bin/htop", None, false);
+        assert_eq!(
+            args,
+            &[
+                "enter",
+                "--name",
+                "dev",
+                "--",
+                "distrobox-export",
+                "--bin",
+                "/usr/bin/htop"
+            ]
+        );
+        assert!(
+            !args.iter().any(|a| a == "--export-path"),
+            "must not contain --export-path when to is None"
+        );
+    }
+
+    #[test]
+    fn export_bin_argv_with_delete() {
+        let args = build_export_bin_argv("dev", "/usr/bin/htop", Some("/home/u/.local/bin"), true);
+        assert_eq!(
+            args,
+            &[
+                "enter",
+                "--name",
+                "dev",
+                "--",
+                "distrobox-export",
+                "--bin",
+                "/usr/bin/htop",
+                "--export-path",
+                "/home/u/.local/bin",
+                "--delete"
+            ]
+        );
+    }
+
+    #[test]
+    fn export_service_argv_no_delete() {
+        let args = build_export_service_argv("dev", "nginx", false);
+        assert_eq!(
+            args,
+            &[
+                "enter",
+                "--name",
+                "dev",
+                "--",
+                "distrobox-export",
+                "--service",
+                "nginx"
+            ]
+        );
+    }
+
+    #[test]
+    fn export_service_argv_with_delete() {
+        let args = build_export_service_argv("dev", "nginx", true);
+        assert_eq!(
+            args,
+            &[
+                "enter",
+                "--name",
+                "dev",
+                "--",
+                "distrobox-export",
+                "--service",
+                "nginx",
+                "--delete"
+            ]
+        );
+    }
+
+    #[test]
+    fn export_list_apps_argv() {
+        let args = build_export_list_apps_argv("dev");
+        assert_eq!(
+            args,
+            &[
+                "enter",
+                "--name",
+                "dev",
+                "--",
+                "distrobox-export",
+                "--list-apps"
+            ]
+        );
+    }
+
+    #[test]
+    fn export_list_bins_argv() {
+        let args = build_export_list_bins_argv("dev");
+        assert_eq!(
+            args,
+            &[
+                "enter",
+                "--name",
+                "dev",
+                "--",
+                "distrobox-export",
+                "--list-binaries"
+            ]
+        );
+    }
 }
