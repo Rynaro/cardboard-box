@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.13.0](https://github.com/Rynaro/cardboard-box/compare/v0.12.0...v0.13.0) (2026-06-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* `cbox enter` lands in the box's home directory by default instead of preserving the host working directory. Use `cbox enter --no-home` for the previous behavior.
+
+### Features
+
+* land in box home on enter; add fully-isolated box ([#39](https://github.com/Rynaro/cardboard-box/issues/39)) ([bb2ae30](https://github.com/Rynaro/cardboard-box/commit/bb2ae30a32e017af5276f9d79abd612c7a1a41f3))
+
 ## [0.12.0](https://github.com/Rynaro/cardboard-box/compare/v0.11.0...v0.12.0) (2026-06-23)
 
 
