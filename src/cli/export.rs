@@ -71,6 +71,14 @@ pub fn run(
             "--to / --export-path is only valid with --bin",
         ));
     }
+    // --bin requires --to: exporting a binary without a destination is a usage error.
+    // Real distrobox-export silently defaults to ~/.local/bin, which can shadow system
+    // binaries — cbox rejects this ambiguity before any runner/box contact.
+    if args.bin.is_some() && args.to.is_none() {
+        return Err(CboxError::usage(
+            "--bin requires --to <HOSTDIR> (the host directory to install the wrapper into)",
+        ));
+    }
     // --delete is forbidden with list modes.
     if args.delete && (args.list_apps || args.list_bins) {
         return Err(CboxError::usage(

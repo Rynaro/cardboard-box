@@ -156,39 +156,29 @@ fn ac_exp_3_bin_with_to_maps_export_path() {
     );
 }
 
-// ─── AC-EXP-4: --bin without --to passes no --export-path ───────────────────
+// ─── AC-EXP-4: --bin without --to is a usage error → exit 64 ────────────────
+// D2: --bin requires --to <HOSTDIR>; omitting --to is rejected at the CLI
+// boundary before any runner/box contact.  This is a CLI-level test (assert_cmd).
+//
+// (Previously this test asserted that the core accepted Bin{to:None} and omitted
+// --export-path in the argv.  That encoded the wrong behaviour — it allowed
+// distrobox-export to silently default to ~/.local/bin.  Corrected per D2.)
 
-#[test]
-fn ac_exp_4_bin_without_to_no_export_path() {
-    let runner = runner_with_box("dev", MockResponse::ok(""));
-    let spec = make_spec(
-        ExportTarget::Bin {
-            path: "/usr/bin/htop".to_string(),
-            to: None,
-        },
-        false,
-    );
+#[cfg(test)]
+mod ac_exp_4_cli {
+    fn cbox_cmd() -> assert_cmd::Command {
+        assert_cmd::Command::cargo_bin("cbox").expect("cbox binary not found")
+    }
 
-    core::export(&spec, &runner).expect("export should succeed");
-
-    let calls = runner.calls();
-    let export_call = calls
-        .iter()
-        .find(|c| c.program == "distrobox")
-        .expect("distrobox call missing");
-    let args = &export_call.args;
-    assert!(
-        args.iter().any(|a| a == "--bin"),
-        "args should contain --bin"
-    );
-    assert!(
-        args.iter().any(|a| a == "/usr/bin/htop"),
-        "args should contain the bin path"
-    );
-    assert!(
-        !args.iter().any(|a| a == "--export-path"),
-        "args must NOT contain --export-path when to is None, got: {args:?}"
-    );
+    /// cbox export dev --bin /usr/bin/htop (no --to) → exit 64
+    #[test]
+    fn ac_exp_4_bin_without_to_exit_64() {
+        cbox_cmd()
+            .args(["export", "dev", "--bin", "/usr/bin/htop"])
+            .env("CBOX_BACKEND", "podman")
+            .assert()
+            .code(64);
+    }
 }
 
 // ─── AC-EXP-5: --service builds service argv ─────────────────────────────────
@@ -368,34 +358,17 @@ fn ac_exp_10_app_not_found_exit_125() {
     );
 }
 
-// ─── AC-EXP-11: --bin without --to surfaces helper error → 125 ───────────────
-
-#[test]
-fn ac_exp_11_bin_missing_export_path_exit_125() {
-    let runner = runner_with_box(
-        "dev",
-        MockResponse::err(1, "--export-path is required when exporting a binary"),
-    );
-    let spec = make_spec(
-        ExportTarget::Bin {
-            path: "/usr/bin/htop".to_string(),
-            to: None,
-        },
-        false,
-    );
-
-    let err = core::export(&spec, &runner).expect_err("should fail with missing export-path");
-    assert_eq!(
-        err.exit_code(),
-        exit::BACKEND_NONZERO,
-        "exit code must be 125"
-    );
-    let msg = err.to_string();
-    assert!(
-        msg.contains("export-path"),
-        "error should mention export-path, got: {msg}"
-    );
-}
+// ─── AC-EXP-11: (removed — scenario was unreachable) ─────────────────────────
+// The original test mocked distrobox-export returning exit 1 with
+// "--export-path is required" for a Bin{to:None} spec.  That code path is now
+// unreachable: the CLI guard in cli/export.rs rejects --bin without --to at
+// exit 64 before the backend is ever contacted.  Additionally, real
+// distrobox-export does NOT error on a missing --export-path — it silently
+// defaults to ~/.local/bin — so the mock did not reflect real behaviour.
+//
+// No replacement is added here because there is no genuinely reachable
+// backend-error scenario specific to the bin target that is not already
+// covered by AC-EXP-9 (helper missing → 70) and AC-EXP-10 (app not found → 125).
 
 // ─── AC-EXP-12: usage errors → exit 64 (CLI guard + clap ArgGroup) ───────────
 

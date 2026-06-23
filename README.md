@@ -76,7 +76,7 @@ That's it. The box is live, provisioned, and ready.
 
 ### A just-works CLI
 
-Seven core subcommands: `create`, `list`, `rm` (alias `destroy`), `enter` (alias `use`), `inspect` (alias `show`), `edit`, `doctor`. Plus `apply` and `up` for provisioning. Global flags for scripting: `--json`, `--dry-run`, `-v` for debugging, `-y` to skip confirmations.
+Core lifecycle subcommands: `create`, `list`, `rm` (alias `destroy`), `enter` (alias `use`), `inspect` (alias `show`), `edit`, `doctor`. Plus `apply` and `up` for provisioning, `secret` for keyring-backed secrets, and `export` for surfacing apps onto the host. Global flags for scripting: `--json`, `--dry-run`, `-v` for debugging, `-y` to skip confirmations.
 
 ```bash
 cbox list --json | jq .
@@ -310,6 +310,7 @@ All commands honor global flags: `--json`, `-q`/`--quiet`, `-v` (show argv), `-v
 | `cbox up <NAME>` | — | Create-if-absent then apply | All create + apply flags |
 | `cbox doctor` | — | Preflight: distrobox + backend health | `--json` |
 | `cbox secret set\|list\|rm <BOX> [KEY]` | — | Store / list / remove secrets in the OS keyring; `set` reads value from hidden prompt or stdin | `--json` |
+| `cbox export <BOX>` | — | Surface a box's app / binary / service onto the host (wraps `distrobox-export`) | `--app`, `--bin` (requires `--to`), `--to` (required with `--bin`), `--service`, `--delete`, `--list-apps`, `--list-bins`, `--json`, `--dry-run` |
 | `cbox` (no args) | `cbox tui` | Launch the TUI (TTY only) | — |
 
 </details>
@@ -323,7 +324,7 @@ All commands honor global flags: `--json`, `-q`/`--quiet`, `-v` (show argv), `-v
 | 64 | Usage error (bad CLI args, invalid name, `--json` on interactive) |
 | 65 | Data error (invalid Boxfile, missing source for copy step) |
 | 69 | Unavailable (box does not exist) |
-| 70 | Software error (distrobox missing, or TUI built without `tui` feature) |
+| 70 | Software error (distrobox / distrobox-export missing, or TUI built without `tui` feature) |
 | 74 | I/O error (spawn/capture failure, guest state-file corruption) |
 | 75 | Temporary failure (backend unreachable, or OS keyring / Secret Service unavailable or a referenced secret is missing) |
 | 125 | Backend non-zero (wrapped distrobox exited non-zero) |
