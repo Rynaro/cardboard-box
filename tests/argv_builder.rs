@@ -324,6 +324,7 @@ fn test_build_enter_argv_basic() {
         root: false,
         clean_path: false,
         cmd: vec![],
+        home_landing: false,
         backend: Backend::Podman,
     };
     let args = build_enter_argv(&spec);
@@ -341,10 +342,100 @@ fn test_build_enter_argv_with_cmd() {
         root: false,
         clean_path: false,
         cmd: vec!["ls".to_string(), "-la".to_string()],
+        home_landing: false,
         backend: Backend::Podman,
     };
     let args = build_enter_argv(&spec);
     assert_args_contain(&args, &["enter", "--name", "web-dev", "--", "ls", "-la"]);
+}
+
+// AC-1: default enter (home_landing=true, no cmd) → lands in the box $HOME via an
+// in-shell `cd "$HOME"; exec <login shell>`.
+#[test]
+fn test_build_enter_argv_home_landing() {
+    use cbox::core::spec::EnterSpec;
+    use cbox::dbox::argv::build_enter_argv;
+
+    let spec = EnterSpec {
+        name: "web-dev".to_string(),
+        root: false,
+        clean_path: false,
+        cmd: vec![],
+        home_landing: true,
+        backend: Backend::Podman,
+    };
+    let args = build_enter_argv(&spec);
+    // enter --name web-dev -- sh -lc 'cd "$HOME"; exec "${SHELL:-/bin/sh}" -l'
+    let sep = args.iter().position(|a| a == "--").expect("-- separator");
+    assert_eq!(&args[..sep], &["enter", "--name", "web-dev"]);
+    assert_eq!(args[sep + 1], "sh");
+    assert_eq!(args[sep + 2], "-lc");
+    assert!(
+        args[sep + 3].contains("cd \"$HOME\"") && args[sep + 3].contains("exec"),
+        "home-landing command should cd to $HOME and exec a shell, got: {}",
+        args[sep + 3]
+    );
+}
+
+// AC-2: --no-home (home_landing=false, no cmd) → bare enter, no redirect.
+#[test]
+fn test_build_enter_argv_no_home_landing() {
+    use cbox::core::spec::EnterSpec;
+    use cbox::dbox::argv::build_enter_argv;
+
+    let spec = EnterSpec {
+        name: "web-dev".to_string(),
+        root: false,
+        clean_path: false,
+        cmd: vec![],
+        home_landing: false,
+        backend: Backend::Podman,
+    };
+    let args = build_enter_argv(&spec);
+    assert_eq!(args, &["enter", "--name", "web-dev"]);
+}
+
+// AC-3: an explicit cmd wins over home_landing — no redirect injected.
+#[test]
+fn test_build_enter_argv_cmd_overrides_home_landing() {
+    use cbox::core::spec::EnterSpec;
+    use cbox::dbox::argv::build_enter_argv;
+
+    let spec = EnterSpec {
+        name: "web-dev".to_string(),
+        root: false,
+        clean_path: false,
+        cmd: vec!["ls".to_string()],
+        home_landing: true, // ignored because cmd is non-empty
+        backend: Backend::Podman,
+    };
+    let args = build_enter_argv(&spec);
+    assert_eq!(args, &["enter", "--name", "web-dev", "--", "ls"]);
+    assert!(
+        !args.iter().any(|a| a == "sh"),
+        "explicit cmd must not inject a shell"
+    );
+}
+
+// Regression: a multi-item unshare value must produce one clean flag per namespace,
+// never a malformed combined token like "--unshare-netns ipc".
+#[test]
+fn test_argv_unshare_list_no_combined_token() {
+    let mut spec = base_spec("sandboxed");
+    spec.unshare = Some("netns ipc".to_string());
+    let args = build_create_argv(&spec);
+    assert_args_contain(&args, &["--unshare-netns", "--unshare-ipc"]);
+    assert!(
+        !args
+            .iter()
+            .any(|a| a.starts_with("--unshare-") && a.contains(' ')),
+        "no --unshare token may contain a space (combined-token bug), got: {args:?}"
+    );
+    let unshare_flags = args.iter().filter(|a| a.starts_with("--unshare-")).count();
+    assert_eq!(
+        unshare_flags, 2,
+        "exactly two --unshare flags expected, got: {args:?}"
+    );
 }
 
 // ─── P2 argv builders (AC-ARGV-P2-1, AC-ARGV-P2-2, AC-ARGV-P2-3) ────────────

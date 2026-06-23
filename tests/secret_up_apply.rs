@@ -111,6 +111,7 @@ fn default_up_args(file: &str) -> UpArgs {
         hostname: None,
         init: false,
         pull: false,
+        isolated: false,
         force: false,
         redo: vec![],
         no_provision: false,

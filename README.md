@@ -47,6 +47,23 @@ cbox create web-dev -i fedora-toolbox:latest
 cbox enter web-dev
 ```
 
+### Want one walled off from your host shell?
+
+```bash
+cbox create scratch -i fedora-toolbox:latest --isolated
+cbox enter scratch
+```
+
+```text
+$ echo $HOME
+/home/me/.local/share/cbox/homes/scratch     # not /home/me
+$ ls -a ~ | grep zshrc                        # your host ~/.zshrc isn't here
+$
+```
+
+Install whatever shell, dotfiles, or app versions you like — they live in the box's
+own `$HOME`, not yours.
+
 ### Or go declarative with a Boxfile
 
 `Boxfile.toml`:
@@ -299,11 +316,11 @@ All commands honor global flags: `--json`, `-q`/`--quiet`, `-v` (show argv), `-v
 
 | Command | Aliases | Purpose | Key flags |
 |---------|---------|---------|-----------|
-| `cbox create <NAME>` | — | Create a box imperatively or from a Boxfile | `-i/--image`, `-p/--package` (repeatable), `-m/--mount` (repeatable), `--docker none\|host\|nested`, `--home`, `--hostname`, `--init`, `--pull`, `--file`, `--dry-run` |
+| `cbox create <NAME>` | — | Create a box imperatively or from a Boxfile | `-i/--image`, `-p/--package` (repeatable), `-m/--mount` (repeatable), `--docker none\|host\|nested`, `--home`, `--hostname`, `--init`, `--pull`, `--isolated`, `--file`, `--dry-run` |
 | `cbox list` | — | List boxes (human table or `--json`) | `-a/--all` (include non-cbox boxes), `--json` |
 | `cbox stop <NAME>...` | — | Stop one or more running boxes (non-destructive) | `-a/--all` |
 | `cbox rm <NAME>...` | `destroy` | Remove boxes (confirm unless `-y`) | `-f/--force`, `--rm-home`, `-y`, `--all` |
-| `cbox enter <NAME>` | `use` | Enter a box interactively | `--root`, `--clean-path` |
+| `cbox enter <NAME>` | `use` | Enter a box interactively — drops you in the box's home dir; pass `--no-home` to stay in the current directory | `--root`, `--clean-path`, `--no-home` |
 | `cbox inspect <NAME>` | `show` | Inspect a box (human panel or `--json`) | `--json`, `--raw` |
 | `cbox edit <NAME>` | — | Edit a box's Boxfile in `$EDITOR` | `--file <PATH>` |
 | `cbox apply <NAME>` | — | Converge a box to its Boxfile | `--file`, `--force`, `--redo <IDX>`, `--no-provision`, `--recreate`, `--dry-run`, `--json` |
@@ -367,6 +384,10 @@ init = false                                          # bool, default false (sys
 home = ""                                             # string path, default "" (unset). custom home dir in box
 hostname = ""                                         # string, default "" (unset). custom hostname
 pull = false                                          # bool, default false. pull image before create
+isolated = false                                      # bool, default false. private $HOME under
+                                                      # $XDG_DATA_HOME/cbox/homes/<name> + process/ipc
+                                                      # unshare, so host shell config/apps stay out.
+                                                      # an explicit `home` above takes precedence.
 
 # --- plaintext env (optional) ---
 [env]

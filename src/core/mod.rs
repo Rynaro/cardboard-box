@@ -564,6 +564,80 @@ pub fn enter(spec: &EnterSpec, runner: &dyn DistroboxRunner) -> Result<i32, Cbox
     Ok(code)
 }
 
+// ─── isolation ─────────────────────────────────────────────────────────────────
+
+/// Namespaces an isolated box unshares from the host by default.
+///
+/// We deliberately KEEP the network namespace shared so DNS, networking, and the
+/// X11/Wayland display socket keep working out of the box — full `--unshare-all`
+/// routinely breaks GUI apps and networking, which defeats the purpose for most
+/// users. Anyone who wants stricter isolation can still set
+/// `[sandbox] unshare = "all"` explicitly.
+const ISOLATED_UNSHARE: [&str; 2] = ["ipc", "process"];
+
+/// Pure path builder for an isolated box's private home: `<data_dir>/cbox/homes/<name>`.
+/// Split out from [`synth_isolated_home`] so it can be unit-tested without touching env.
+pub fn isolated_home_under(data_dir: &str, name: &str) -> String {
+    format!("{data_dir}/cbox/homes/{name}")
+}
+
+/// The default private home path for an isolated box.
+/// Honors `$XDG_DATA_HOME` when set and non-empty, else falls back to `$HOME/.local/share`.
+pub fn synth_isolated_home(name: &str) -> String {
+    let data_dir = match std::env::var("XDG_DATA_HOME") {
+        Ok(v) if !v.is_empty() => v,
+        _ => {
+            let home = std::env::var("HOME").unwrap_or_default();
+            format!("{home}/.local/share")
+        }
+    };
+    isolated_home_under(&data_dir, name)
+}
+
+/// Merge an existing unshare value with the namespaces `add`, returning a
+/// normalized space-separated string. `"all"` short-circuits (already maximal).
+/// Accepts whitespace- or comma-separated input; output is deduped + sorted.
+fn merge_unshare(existing: Option<&str>, add: &[&str]) -> String {
+    if existing == Some("all") {
+        return "all".to_string();
+    }
+    let mut set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    if let Some(e) = existing {
+        for item in e.split(|c: char| c.is_whitespace() || c == ',') {
+            let item = item.trim();
+            if !item.is_empty() {
+                set.insert(item.to_string());
+            }
+        }
+    }
+    for a in add {
+        set.insert((*a).to_string());
+    }
+    set.into_iter().collect::<Vec<_>>().join(" ")
+}
+
+/// Expand an "isolated box" request onto a [`CreateSpec`], in place.
+///
+/// - Sets a private `--home` (the XDG path) ONLY when the user has not already
+///   set an explicit home — explicit home always wins.
+/// - Unshares the [`ISOLATED_UNSHARE`] namespaces (merged with any existing set).
+///
+/// We deliberately do NOT force `--init`: it requires a systemd-capable image,
+/// and the common toolbox images (e.g. fedora-toolbox) ship none, so forcing it
+/// makes the box fail to enter ("no init found"). `--unshare-process` /
+/// `--unshare-ipc` work fine without it. Users who want systemd can still opt in
+/// with `[sandbox] init = true` and a suitable image.
+///
+/// Idempotent: applying it more than once yields the same spec, so it is safe to
+/// call from both the Boxfile path and the `--isolated` CLI-flag path.
+pub fn apply_isolation(spec: &mut CreateSpec, name: &str) {
+    let needs_home = matches!(spec.home.as_deref(), None | Some(""));
+    if needs_home {
+        spec.home = Some(synth_isolated_home(name));
+    }
+    spec.unshare = Some(merge_unshare(spec.unshare.as_deref(), &ISOLATED_UNSHARE));
+}
+
 // ─── export ──────────────────────────────────────────────────────────────────
 
 /// Exec `distrobox enter --name <BOX> -- distrobox-export <flags>` (imperative, D1).

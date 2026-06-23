@@ -128,6 +128,10 @@ pub struct EnterSpec {
     pub root: bool,
     pub clean_path: bool,
     pub cmd: Vec<String>,
+    /// When true and no explicit `cmd` is given, drop the user in the box's own
+    /// `$HOME` instead of inheriting the host working directory. Set false by
+    /// `--no-home` or whenever an explicit command is passed.
+    pub home_landing: bool,
     /// Engine the box lives on — pins `distrobox` to the right backend.
     pub backend: Backend,
 }

@@ -96,15 +96,28 @@ pub fn diff_boxfile_vs_live(bf: &Boxfile, live: &InspectResult) -> DiffResult {
     // mode being fixed). We choose "warn + proceed" over a hard Recreate here
     // because we cannot be sure the box actually differs; a hard Recreate on a
     // false-positive would destroy the user's box data unexpectedly.
-    let bf_home = bf.box_config.home.trim();
-    if !bf_home.is_empty() {
+    //
+    // `[box] isolated` also implies a custom home: it synthesizes the SAME private
+    // path that `create` uses (via the shared `synth_isolated_home` helper, so the
+    // two can never drift). Without folding that in here, toggling `isolated` on a
+    // shared-home box would leave the raw `home` empty, skip this check, and
+    // silently fail to trigger the required recreate.
+    let explicit_home = bf.box_config.home.trim();
+    let effective_home: String = if !explicit_home.is_empty() {
+        explicit_home.to_string()
+    } else if bf.box_config.isolated {
+        super::synth_isolated_home(&bf.name)
+    } else {
+        String::new()
+    };
+    if !effective_home.is_empty() {
         match &live.home {
             Some(live_home) => {
-                if bf_home != live_home.as_str() {
+                if effective_home != *live_home {
                     fields.push(DiffField {
                         field: "home".to_string(),
                         old: live_home.clone(),
-                        new: bf_home.to_string(),
+                        new: effective_home.clone(),
                         class: "Recreate".to_string(),
                     });
                 }
@@ -117,14 +130,14 @@ pub fn diff_boxfile_vs_live(bf: &Boxfile, live: &InspectResult) -> DiffResult {
                 fields.push(DiffField {
                     field: "home".to_string(),
                     old: "(unverifiable — inspect returned no HOME env)".to_string(),
-                    new: bf_home.to_string(),
+                    new: effective_home.clone(),
                     class: "Warn".to_string(),
                 });
             }
         }
     }
-    // When bf_home is empty we skip the check entirely — the user has not set a
-    // custom home, so whatever distrobox chose is correct.
+    // When the effective home is empty we skip the check entirely — the user has not
+    // set a custom home (or isolated), so whatever distrobox chose is correct.
 
     // --- box.hostname ---
     // Same Recreate classification: --hostname is fixed at create time.
@@ -582,6 +595,7 @@ mod tests {
                 home: home.to_string(),
                 hostname: hostname.to_string(),
                 pull: false,
+                isolated: false,
             },
             sandbox: crate::boxfile::model::SandboxConfig::default(),
             secrets: std::collections::BTreeMap::new(),
@@ -640,6 +654,37 @@ mod tests {
         assert_eq!(home_field.class, "Recreate");
         assert_eq!(home_field.old, "/home/rynaro");
         assert_eq!(home_field.new, "/home/rynaro/.cbox-homes/testbox");
+    }
+
+    // [box] isolated synthesizes a private home, so toggling it on a shared-home
+    // box must trigger a Recreate even though the raw `[box] home` is empty
+    // (regression guard for the isolated-toggle diff gotcha).
+    #[test]
+    fn isolated_toggle_triggers_recreate() {
+        let live = make_live_with_home(
+            "ubuntu:22.04",
+            Some("/home/rynaro"), // live: shared host home
+            Some("testbox-box"),
+        );
+        let mut bf = make_boxfile_with_home("ubuntu:22.04", "", "testbox-box");
+        bf.box_config.isolated = true; // no explicit home → synthesized private home
+        let result = diff_boxfile_vs_live(&bf, &live);
+        assert_eq!(
+            result.class, "Recreate",
+            "toggling isolated must trigger recreate"
+        );
+        let home_field = result
+            .fields
+            .iter()
+            .find(|f| f.field == "home")
+            .expect("home diff field must be present");
+        assert_eq!(home_field.class, "Recreate");
+        assert_eq!(home_field.old, "/home/rynaro");
+        assert!(
+            home_field.new.ends_with("/cbox/homes/testbox"),
+            "synthesized isolated home should end with /cbox/homes/testbox, got: {}",
+            home_field.new
+        );
     }
 
     // changed hostname → Recreate

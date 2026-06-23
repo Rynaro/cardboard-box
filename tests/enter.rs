@@ -10,6 +10,7 @@ fn make_enter_spec(name: &str) -> EnterSpec {
         root: false,
         clean_path: false,
         cmd: vec![],
+        home_landing: false,
         backend: Backend::Podman,
     }
 }
@@ -47,6 +48,7 @@ fn enter_pins_backend_env() {
         root: false,
         clean_path: false,
         cmd: vec![],
+        home_landing: false,
         backend: Backend::Docker,
     };
 
@@ -71,6 +73,7 @@ fn ac_enter_2_passthrough_cmd() {
         root: false,
         clean_path: false,
         cmd: vec!["ls".to_string(), "-la".to_string()],
+        home_landing: false,
         backend: Backend::Podman,
     };
 
