@@ -165,6 +165,7 @@ fn ac_prov_3_copy_spawn() {
         dry_run: false,
         provision_env_keys: &[],
         provision_env: &[],
+        box_home: None,
     };
 
     let mut state = ProvisionState::new();
@@ -207,6 +208,7 @@ fn ac_prov_4_copy_missing_src() {
         dry_run: false,
         provision_env_keys: &[],
         provision_env: &[],
+        box_home: None,
     };
 
     let mut state = ProvisionState::new();
@@ -253,6 +255,7 @@ fn ac_prov_5_partial_failure_resume() {
         dry_run: false,
         provision_env_keys: &[],
         provision_env: &[],
+        box_home: None,
     };
 
     let mut state = ProvisionState::new();
@@ -300,6 +303,7 @@ fn ac_prov_5_partial_failure_resume() {
         dry_run: false,
         provision_env_keys: &[],
         provision_env: &[],
+        box_home: None,
     };
 
     let results2 = provision(&plan2, &store2, &runner2, &mut state2).unwrap();
@@ -440,6 +444,7 @@ fn ac_prov_9_failure_error_surfaces_stderr_and_index() {
         dry_run: false,
         provision_env_keys: &[],
         provision_env: &[],
+        box_home: None,
     };
 
     let mut state = ProvisionState::new();
@@ -504,6 +509,7 @@ fn ac_prov_10_failed_step_reruns_not_skipped() {
         dry_run: false,
         provision_env_keys: &[],
         provision_env: &[],
+        box_home: None,
     };
 
     let mut state = store.read("electionbuddy", &runner).unwrap();
@@ -563,6 +569,7 @@ fn ac_prov_11_ok_step_with_matching_hash_is_skipped() {
         dry_run: false,
         provision_env_keys: &[],
         provision_env: &[],
+        box_home: None,
     };
 
     let mut state = store.read("web-dev", &runner).unwrap();
@@ -598,6 +605,7 @@ fn g_idempotent_second_apply_makes_zero_run_spawns() {
         dry_run: false,
         provision_env_keys: &[],
         provision_env: &[],
+        box_home: None,
     };
 
     let mut state1 = ProvisionState::new();
@@ -621,6 +629,7 @@ fn g_idempotent_second_apply_makes_zero_run_spawns() {
         dry_run: false,
         provision_env_keys: &[],
         provision_env: &[],
+        box_home: None,
     };
 
     let results2 = provision(&plan2, &store2, &runner2, &mut state2).unwrap();
@@ -632,5 +641,104 @@ fn g_idempotent_second_apply_makes_zero_run_spawns() {
         runner2.call_count(),
         0,
         "second apply should make zero provision spawns"
+    );
+}
+
+// ─── AC-PROV-HOST-COPY: box_home triggers host-side copy (no engine spawn) ──
+
+#[test]
+fn ac_prov_host_copy_writes_file_and_no_runner_spawn() {
+    let tmp = TempDir::new().unwrap();
+    // Source file (simulating a dotfile in the Boxfile directory).
+    let src = tmp.path().join("id_rsa.pub");
+    std::fs::write(&src, b"ssh-rsa AAAA... user@host").unwrap();
+
+    // Private box home in a sub-directory of the temp dir.
+    let box_home_dir = tmp.path().join("private-home");
+    std::fs::create_dir_all(&box_home_dir).unwrap();
+    let box_home_str = box_home_dir.to_str().unwrap().to_string();
+
+    let runner = MockRunner::new().with_default(MockResponse::ok(""));
+    let store = MemoryStateStore::empty();
+
+    let step = copy_step(src.to_str().unwrap(), "~/.ssh/id_rsa.pub");
+    let plan = ProvisionPlan {
+        name: "isolated-box",
+        steps: &[step],
+        boxfile_dir: tmp.path(),
+        backend: &Backend::Podman,
+        force: false,
+        redo: &[],
+        dry_run: false,
+        provision_env_keys: &[],
+        provision_env: &[],
+        box_home: Some(&box_home_str),
+    };
+
+    let mut state = ProvisionState::new();
+    let results = provision(&plan, &store, &runner, &mut state).unwrap();
+
+    // Step must succeed as "copied".
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].status, "copied", "host-side copy should succeed");
+
+    // File must exist on host at the expanded path.
+    let expected = box_home_dir.join(".ssh/id_rsa.pub");
+    assert!(
+        expected.exists(),
+        "file should have been written on the host at {}",
+        expected.display()
+    );
+
+    // No runner spawn for the copy step — it was done host-side.
+    // (runner may have zero calls total in this simple case)
+    let cp_calls: Vec<_> = runner
+        .calls()
+        .into_iter()
+        .filter(|c| c.program == "podman" && c.args.iter().any(|a| a == "cp"))
+        .collect();
+    assert!(
+        cp_calls.is_empty(),
+        "engine cp should NOT have been called for a host-side copy, got: {:?}",
+        cp_calls
+    );
+}
+
+// ─── AC-PROV-3 regression: box_home=None still uses engine cp ─────────────────
+
+// The original ac_prov_3_copy_spawn already tests box_home=None.
+// This test explicitly names the regression scenario.
+#[test]
+fn ac_prov_3_copy_spawn_unchanged_for_shared_home() {
+    let dir = TempDir::new().unwrap();
+    let src = dir.path().join("dotfile");
+    std::fs::write(&src, b"dotfile contents").unwrap();
+
+    let runner = MockRunner::new().with_default(MockResponse::ok(""));
+    let store = MemoryStateStore::empty();
+
+    let step = copy_step(src.to_str().unwrap(), "/home/user/.vimrc");
+    let plan = ProvisionPlan {
+        name: "web-dev",
+        steps: &[step],
+        boxfile_dir: dir.path(),
+        backend: &Backend::Podman,
+        force: false,
+        redo: &[],
+        dry_run: false,
+        provision_env_keys: &[],
+        provision_env: &[],
+        box_home: None,
+    };
+
+    let mut state = ProvisionState::new();
+    let results = provision(&plan, &store, &runner, &mut state).unwrap();
+    assert_eq!(results[0].status, "copied");
+
+    let calls = runner.calls();
+    let cp_call = calls.iter().find(|c| c.program == "podman");
+    assert!(
+        cp_call.is_some(),
+        "engine cp should still be called for shared-home boxes"
     );
 }

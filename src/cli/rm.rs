@@ -87,11 +87,20 @@ pub fn run(
             "action": "rm",
             "removed": outcome.removed,
             "skipped": outcome.skipped,
+            "removed_homes": outcome.removed_homes,
+            "kept_homes": outcome.kept_homes,
         });
         ctx.print_json(&v);
     } else {
         for name in &outcome.removed {
             ctx.success(&format!("Removed box \"{name}\""));
+        }
+        for path in &outcome.removed_homes {
+            ctx.success(&format!("Removed private home at {path}"));
+        }
+        for path in &outcome.kept_homes {
+            ctx.hint(&format!("private home kept at {path}"));
+            ctx.hint("pass --rm-home to delete it");
         }
     }
 

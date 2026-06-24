@@ -3,8 +3,9 @@
 //! These exercise the pure expansion (`core::apply_isolation`) and its effect on
 //! the create argv; the CLI/Boxfile flag wiring is a thin call into these.
 
+use cbox::core::provision::resolve_host_dst;
 use cbox::core::spec::CreateSpec;
-use cbox::core::{apply_isolation, isolated_home_under, synth_isolated_home};
+use cbox::core::{apply_isolation, isolated_home_under, private_box_home, synth_isolated_home};
 use cbox::dbox::argv::build_create_argv;
 use cbox::dbox::backend::Backend;
 
@@ -129,4 +130,125 @@ fn isolated_spec_produces_expected_create_argv() {
         !args.iter().any(|a| a == "--unshare-netns"),
         "default isolation must not unshare netns"
     );
+}
+
+// ─── resolve_host_dst (Change 3) ─────────────────────────────────────────────
+
+const HOME: &str = "/home/rynaro/.local/share/cbox/homes/mybox";
+
+#[test]
+fn resolve_host_dst_tilde_exact() {
+    assert_eq!(
+        resolve_host_dst("~", HOME),
+        Some(HOME.to_string()),
+        "bare ~ maps to home"
+    );
+}
+
+#[test]
+fn resolve_host_dst_dollar_home_exact() {
+    assert_eq!(resolve_host_dst("$HOME", HOME), Some(HOME.to_string()));
+}
+
+#[test]
+fn resolve_host_dst_dollar_brace_home_exact() {
+    assert_eq!(resolve_host_dst("${HOME}", HOME), Some(HOME.to_string()));
+}
+
+#[test]
+fn resolve_host_dst_tilde_prefix() {
+    assert_eq!(
+        resolve_host_dst("~/.ssh/id_rsa", HOME),
+        Some(format!("{HOME}/.ssh/id_rsa"))
+    );
+}
+
+#[test]
+fn resolve_host_dst_dollar_home_prefix() {
+    assert_eq!(
+        resolve_host_dst("$HOME/.config/git/config", HOME),
+        Some(format!("{HOME}/.config/git/config"))
+    );
+}
+
+#[test]
+fn resolve_host_dst_dollar_brace_home_prefix() {
+    assert_eq!(
+        resolve_host_dst("${HOME}/.bashrc", HOME),
+        Some(format!("{HOME}/.bashrc"))
+    );
+}
+
+#[test]
+fn resolve_host_dst_relative() {
+    assert_eq!(resolve_host_dst("x/y", HOME), Some(format!("{HOME}/x/y")));
+}
+
+#[test]
+fn resolve_host_dst_absolute_inside_home() {
+    let inside = format!("{HOME}/.ssh/id_rsa");
+    assert_eq!(
+        resolve_host_dst(&inside, HOME),
+        Some(inside.clone()),
+        "absolute path inside home maps to itself"
+    );
+}
+
+#[test]
+fn resolve_host_dst_absolute_equal_home() {
+    assert_eq!(
+        resolve_host_dst(HOME, HOME),
+        Some(HOME.to_string()),
+        "absolute path == home maps to home"
+    );
+}
+
+#[test]
+fn resolve_host_dst_absolute_outside_home() {
+    assert_eq!(
+        resolve_host_dst("/etc/passwd", HOME),
+        None,
+        "absolute path outside home must return None"
+    );
+}
+
+#[test]
+fn resolve_host_dst_trailing_slash_on_home_is_stripped() {
+    let home_with_slash = format!("{HOME}/");
+    assert_eq!(
+        resolve_host_dst("~/.vimrc", &home_with_slash),
+        Some(format!("{HOME}/.vimrc")),
+        "trailing slash on home must be stripped before joining"
+    );
+}
+
+// ─── private_box_home (Change 3) ─────────────────────────────────────────────
+
+#[test]
+fn private_box_home_returns_none_when_matches_real_home() {
+    let real = std::env::var("HOME").unwrap_or_else(|_| "/home/user".to_string());
+    // When the candidate home IS the real HOME, it's not private.
+    let result = private_box_home(Some(&real));
+    assert!(
+        result.is_none(),
+        "home equal to $HOME must not be treated as private"
+    );
+}
+
+#[test]
+fn private_box_home_returns_some_for_private_path() {
+    let private = "/home/rynaro/.local/share/cbox/homes/mybox";
+    // As long as this differs from $HOME it should be returned.
+    let real = std::env::var("HOME").unwrap_or_default();
+    if private == real {
+        // Degenerate env — skip.
+        return;
+    }
+    assert_eq!(private_box_home(Some(private)), Some(private.to_string()));
+}
+
+#[test]
+fn private_box_home_returns_none_for_empty() {
+    assert!(private_box_home(Some("")).is_none());
+    assert!(private_box_home(None).is_none());
 }

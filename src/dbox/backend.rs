@@ -95,6 +95,15 @@ impl Backend {
         Ok(found)
     }
 
+    /// Return the other container engine (Podman↔Docker).
+    /// Used by the cross-backend guard in `resolve_backend`.
+    pub fn opposite(&self) -> Backend {
+        match self {
+            Backend::Podman => Backend::Docker,
+            Backend::Docker => Backend::Podman,
+        }
+    }
+
     /// Parse a backend name leniently (case-insensitive); `None` if unknown.
     /// Used to turn a `BoxRow.backend` string back into a `Backend` for routing.
     // Only exercised by the TUI today; the lean (tui-off) build sees no caller.
@@ -172,5 +181,63 @@ fn libc_getuid() -> u32 {
     #[cfg(not(unix))]
     {
         1000
+    }
+}
+
+#[cfg(test)]
+mod detect_env_tests {
+    use super::*;
+
+    // $CBOX_BACKEND / $DBX_CONTAINER_MANAGER are process-global; serialize the
+    // env-mutating tests (held across clear → set → call → restore, recovering
+    // from a poisoned lock) so they can't race each other under cargo's parallel
+    // runner. These pin the precedence that `resolve_backend`'s create-new path
+    // (`[] => Backend::detect(override_arg)`) relies on to honor $CBOX_BACKEND.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn with_env<T>(set: &[(&str, &str)], f: impl FnOnce() -> T) -> T {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let keys = ["CBOX_BACKEND", "DBX_CONTAINER_MANAGER"];
+        let saved: Vec<(&str, Option<String>)> =
+            keys.iter().map(|k| (*k, std::env::var(k).ok())).collect();
+        for k in keys {
+            std::env::remove_var(k);
+        }
+        for (k, v) in set {
+            std::env::set_var(k, v);
+        }
+        let out = f();
+        for (k, v) in saved {
+            match v {
+                Some(val) => std::env::set_var(k, val),
+                None => std::env::remove_var(k),
+            }
+        }
+        out
+    }
+
+    // $CBOX_BACKEND is honored by detect (returned before any backend probe).
+    #[test]
+    fn detect_honors_cbox_backend_docker() {
+        let b = with_env(&[("CBOX_BACKEND", "docker")], || Backend::detect(None));
+        assert_eq!(b.unwrap(), Backend::Docker);
+    }
+
+    // $DBX_CONTAINER_MANAGER is honored when $CBOX_BACKEND is unset.
+    #[test]
+    fn detect_honors_dbx_container_manager_docker() {
+        let b = with_env(&[("DBX_CONTAINER_MANAGER", "docker")], || {
+            Backend::detect(None)
+        });
+        assert_eq!(b.unwrap(), Backend::Docker);
+    }
+
+    // An explicit --backend override still wins over the env vars.
+    #[test]
+    fn detect_override_wins_over_env() {
+        let b = with_env(&[("CBOX_BACKEND", "docker")], || {
+            Backend::detect(Some("podman"))
+        });
+        assert_eq!(b.unwrap(), Backend::Podman);
     }
 }

@@ -33,6 +33,54 @@ pub struct ProvisionPlan<'a> {
     /// (KEY, VALUE) pairs for persist=false secrets → Invocation.env for shell steps.
     /// EMPTY for copy steps (no secret injection needed for file copies).
     pub provision_env: &'a [(String, String)],
+
+    // ─── host-side copy (Change 3) ────────────────────────────────────────────
+    /// The box's private HOST home directory, when the box is isolated or has a
+    /// custom `--home` that is NOT the user's real `$HOME`.  When set, copy steps
+    /// whose `dst` resolves inside this home are fulfilled on the host directly
+    /// (no engine spawn) — making them backend-agnostic and allowing `~` expansion.
+    /// `None` for shared-home boxes → falls through to the engine `cp` path unchanged.
+    pub box_home: Option<&'a str>,
+}
+
+// ─── Host-side dst resolution (Change 3) ─────────────────────────────────────
+
+/// Map a copy `dst` to a concrete host path under `home`.
+///
+/// Rules (pure string logic — no fs/env access):
+/// - `~`, `$HOME`, `${HOME}` (exact) → `home`
+/// - prefix `~/`, `$HOME/`, `${HOME}/` → `home` + remainder
+/// - relative (no leading `/`) → `home/<dst>`
+/// - absolute inside home (== home or starts_with `home/`) → `dst` itself
+/// - any other absolute path → `None` (outside the home — must use engine)
+///
+/// A trailing `/` on `home` is stripped first for consistent joins.
+pub fn resolve_host_dst(dst: &str, home: &str) -> Option<String> {
+    let home = home.trim_end_matches('/');
+    // Exact tokens → home itself.
+    if dst == "~" || dst == "$HOME" || dst == "${HOME}" {
+        return Some(home.to_string());
+    }
+    // Prefix expansions.
+    for prefix in &["~/", "$HOME/", "${HOME}/"] {
+        if let Some(rest) = dst.strip_prefix(prefix) {
+            return Some(format!("{home}/{rest}"));
+        }
+    }
+    // Absolute path checks.
+    if dst.starts_with('/') {
+        if dst == home {
+            return Some(dst.to_string());
+        }
+        let home_slash = format!("{home}/");
+        if dst.starts_with(&home_slash) {
+            return Some(dst.to_string());
+        }
+        // Outside the private home — must go through the engine.
+        return None;
+    }
+    // Relative → join under home.
+    Some(format!("{home}/{dst}"))
 }
 
 // ─── Hashing (§5.2) ──────────────────────────────────────────────────────────
@@ -265,6 +313,72 @@ fn run_step(
             let src_path = resolve_src(src, plan.boxfile_dir);
             let src_str = src_path.to_string_lossy().to_string();
 
+            // Host-side copy: when the box has a private home and the dst resolves
+            // inside that home, copy directly on the host — no engine, no backend.
+            if let Some(home) = plan.box_home {
+                if let Some(host_dst) = resolve_host_dst(dst, home) {
+                    let host_argv = vec!["cp".to_string(), src_str.clone(), host_dst.clone()];
+                    if plan.dry_run {
+                        return Ok(ProvisionStepResult {
+                            idx,
+                            step_type: "copy".to_string(),
+                            status: "copied".to_string(),
+                            hash: hash.to_string(),
+                            duration_ms: 0,
+                            exit_code: Some(0),
+                            captured_stderr: String::new(),
+                            captured_stdout: String::new(),
+                            argv: host_argv,
+                        });
+                    }
+                    // Create parent directory, then copy.
+                    let parent = std::path::Path::new(&host_dst)
+                        .parent()
+                        .unwrap_or_else(|| std::path::Path::new("."));
+                    if let Err(e) = std::fs::create_dir_all(parent) {
+                        return Ok(ProvisionStepResult {
+                            idx,
+                            step_type: "copy".to_string(),
+                            status: "failed".to_string(),
+                            hash: hash.to_string(),
+                            duration_ms: 0,
+                            exit_code: Some(1),
+                            captured_stderr: format!(
+                                "failed to create parent directory {}: {e}",
+                                parent.display()
+                            ),
+                            captured_stdout: String::new(),
+                            argv: host_argv,
+                        });
+                    }
+                    if let Err(e) = std::fs::copy(&src_path, &host_dst) {
+                        return Ok(ProvisionStepResult {
+                            idx,
+                            step_type: "copy".to_string(),
+                            status: "failed".to_string(),
+                            hash: hash.to_string(),
+                            duration_ms: 0,
+                            exit_code: Some(1),
+                            captured_stderr: format!("failed to copy {src_str} -> {host_dst}: {e}"),
+                            captured_stdout: String::new(),
+                            argv: host_argv,
+                        });
+                    }
+                    return Ok(ProvisionStepResult {
+                        idx,
+                        step_type: "copy".to_string(),
+                        status: "copied".to_string(),
+                        hash: hash.to_string(),
+                        duration_ms: 0,
+                        exit_code: Some(0),
+                        captured_stderr: String::new(),
+                        captured_stdout: String::new(),
+                        argv: host_argv,
+                    });
+                }
+            }
+
+            // Engine copy (fallback for shared-home boxes or dst outside private home).
             let args = build_copy_argv(plan.name, &src_str, dst);
             let mode = if plan.dry_run {
                 RunMode::DryRun
