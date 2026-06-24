@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/Rynaro/cardboard-box/compare/v0.13.0...v0.14.0) (2026-06-24)
+
+
+### Features
+
+* isolated-box rm-home cleanup, host-side copy, and safer backend/socket resolution ([#42](https://github.com/Rynaro/cardboard-box/issues/42)) ([6a91c14](https://github.com/Rynaro/cardboard-box/commit/6a91c14fe2ad00981465feaadaf3e46e1839f820))
+
 ## [0.13.0](https://github.com/Rynaro/cardboard-box/compare/v0.12.0...v0.13.0) (2026-06-23)
 
 
