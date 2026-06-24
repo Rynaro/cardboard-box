@@ -48,6 +48,8 @@ fn ac_create_1_basic_create() {
 }
 
 // AC-CREATE-2: docker=host + podman backend → correct socket volume + docker-cli package.
+// dry_run=true bypasses the socket pre-flight so we can test argv assembly without a
+// live podman socket.
 #[test]
 fn ac_create_2_docker_host_podman() {
     let runner = MockRunner::new().with_default(MockResponse::ok(""));
@@ -55,6 +57,7 @@ fn ac_create_2_docker_host_podman() {
     spec.docker_mode = DockerMode::Host;
     spec.backend = Backend::Podman;
     spec.uid = 1000;
+    spec.dry_run = true; // skip socket pre-flight; we only test argv shape
 
     let _outcome = core::create(&spec, &runner).expect("create should succeed");
 

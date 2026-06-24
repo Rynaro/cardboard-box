@@ -2,7 +2,7 @@
 //! All against MockRunner; zero real distrobox invocations.
 
 use cbox::core::{
-    self,
+    self, resolve_backend,
     spec::{CreateSpec, DockerMode, UpSpec},
     state_store::{ProvisionState, ProvisionStateStore},
 };
@@ -328,4 +328,66 @@ run = "echo hello"
     assert!(outcome.ok);
     // created = true because the box was absent
     assert!(outcome.created);
+}
+
+// ─── Cross-backend guard (Change 2) ──────────────────────────────────────────
+
+fn ps_json_for(name: &str) -> String {
+    format!(
+        r#"[{{"Names":["{name}"],"State":"running","Image":"ubuntu:22.04","Id":"abc1","Labels":{{"manager":"distrobox","cbox.managed":"true","cbox.docker_mode":"none"}}}}]"#
+    )
+}
+
+/// --backend docker given, docker reports empty, podman has the box → Err.
+#[test]
+fn resolve_backend_cross_backend_guard_returns_err() {
+    let runner = MockRunner::new()
+        .with_matcher(
+            MockMatcher::new(MockResponse::ok("[]"))
+                .with_program("docker")
+                .with_args_contain(vec!["ps".to_string()]),
+        )
+        .with_matcher(
+            MockMatcher::new(MockResponse::ok(ps_json_for("mybox")))
+                .with_program("podman")
+                .with_args_contain(vec!["ps".to_string()]),
+        )
+        .with_default(MockResponse::ok("[]"));
+
+    let err = resolve_backend("mybox", Some("docker"), &runner)
+        .expect_err("should return Err when box is on the other backend");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("podman"),
+        "error should name the engine the box is on, got: {msg}"
+    );
+    assert!(
+        msg.contains("mybox"),
+        "error should name the box, got: {msg}"
+    );
+}
+
+/// --backend docker given, box exists nowhere → Ok(Docker) (creation target not regressed).
+#[test]
+fn resolve_backend_new_box_with_override_returns_override() {
+    let runner = MockRunner::new()
+        .with_matcher(
+            MockMatcher::new(MockResponse::ok("[]"))
+                .with_program("docker")
+                .with_args_contain(vec!["ps".to_string()]),
+        )
+        .with_matcher(
+            MockMatcher::new(MockResponse::ok("[]"))
+                .with_program("podman")
+                .with_args_contain(vec!["ps".to_string()]),
+        )
+        .with_default(MockResponse::ok("[]"));
+
+    let backend = resolve_backend("newbox", Some("docker"), &runner)
+        .expect("box nowhere + docker override should succeed (creation target)");
+    assert_eq!(
+        backend,
+        Backend::Docker,
+        "should return Docker when box exists nowhere and --backend docker is given"
+    );
 }

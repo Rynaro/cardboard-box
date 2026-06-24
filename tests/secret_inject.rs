@@ -182,6 +182,7 @@ fn ac_sec_2_persist_false_at_provision_only() {
         dry_run: false,
         provision_env_keys: &provision_env_keys,
         provision_env: &provision_env,
+        box_home: None,
     };
 
     let mem_store = MemoryStore::empty();
@@ -364,6 +365,7 @@ fn ac_sec_5_no_value_in_argv_on_step_failure() {
         dry_run: false,
         provision_env_keys: &provision_env_keys,
         provision_env: &provision_env,
+        box_home: None,
     };
 
     let mem_store = MemoryStore::empty();
@@ -472,6 +474,7 @@ fn ac_roundtrip_1_full_roundtrip_inv1() {
         dry_run: false,
         provision_env_keys: &provision_env_keys,
         provision_env: &provision_env,
+        box_home: None,
     };
 
     let mem_store = MemoryStore::empty();

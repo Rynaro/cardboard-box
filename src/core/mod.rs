@@ -43,7 +43,63 @@ pub struct CreateOutcome {
     pub dry_run_output: Option<String>,
 }
 
+/// Pure inner check so unit tests can inject the `socket_exists` flag directly.
+///
+/// Returns `Err(CboxError::TempFail)` when the socket is required but absent.
+/// Always returns `Ok` when `dry_run` is true or `docker_mode` is not `Host`.
+pub fn socket_preflight(
+    backend_name: &str,
+    socket_path: &str,
+    is_host: bool,
+    dry_run: bool,
+    socket_exists: bool,
+) -> Result<(), CboxError> {
+    if dry_run || !is_host {
+        return Ok(());
+    }
+    if socket_exists {
+        return Ok(());
+    }
+    let (remedy, alt_backend) = if backend_name == "podman" {
+        (
+            "start it:  systemctl --user start podman.socket\n  persist: systemctl --user enable --now podman.socket",
+            "docker",
+        )
+    } else {
+        ("start it:  sudo systemctl start docker.socket", "podman")
+    };
+    Err(CboxError::tempfail(format!(
+        "docker=\"host\" needs the {backend_name} API socket at {socket_path}, but it isn't running.\n  \
+         {remedy}\n  \
+         or target {alt_backend} instead:  cbox up --backend {alt_backend}  (or CBOX_BACKEND={alt_backend})"
+    )))
+}
+
+/// Pre-flight guard for `docker = "host"` socket availability.
+///
+/// Called before any mutating spawn so a missing socket surfaces as an actionable
+/// error rather than a cryptic `statfs: no such file or directory` from distrobox.
+/// No-ops when `dry_run` is true or `docker_mode != DockerMode::Host`.
+fn ensure_docker_host_socket(
+    backend: &Backend,
+    docker_mode: &spec::DockerMode,
+    dry_run: bool,
+) -> Result<(), CboxError> {
+    let is_host = *docker_mode == spec::DockerMode::Host;
+    let socket_path = backend.socket_path();
+    let socket_exists = std::path::Path::new(&socket_path).exists();
+    socket_preflight(
+        backend.as_str(),
+        &socket_path,
+        is_host,
+        dry_run,
+        socket_exists,
+    )
+}
+
 pub fn create(spec: &CreateSpec, runner: &dyn DistroboxRunner) -> Result<CreateOutcome, CboxError> {
+    ensure_docker_host_socket(&spec.backend, &spec.docker_mode, spec.dry_run)?;
+
     let args = build_create_argv(spec);
     let mode = if spec.dry_run {
         RunMode::DryRun
@@ -353,9 +409,41 @@ pub fn resolve_backend(
     runner: &dyn DistroboxRunner,
 ) -> Result<Backend, CboxError> {
     let usable = Backend::usable(override_arg)?;
+
+    // When an explicit --backend override is given, `usable` is always length 1
+    // (Backend::usable short-circuits to the single requested backend).
+    // Before returning it unconditionally, check that the box isn't actually on
+    // the OTHER engine — if it is, surface a clear error.
+    if override_arg.is_some() {
+        // usable.len() == 1 guaranteed by Backend::usable when override is set.
+        let want = &usable[0];
+        let on_want = list_machine(want, runner)
+            .map(|o| o.boxes.iter().any(|row| row.name == name))
+            .unwrap_or(false);
+        if !on_want {
+            let other = want.opposite();
+            let on_other = list_machine(&other, runner)
+                .map(|o| o.boxes.iter().any(|row| row.name == name))
+                .unwrap_or(false);
+            if on_other {
+                return Err(CboxError::usage(format!(
+                    "Box \"{name}\" is on {}, not {}. \
+                     Omit --backend, or use --backend {}.",
+                    other.as_str(),
+                    want.as_str(),
+                    other.as_str(),
+                )));
+            }
+        }
+        return Ok(want.clone());
+    }
+
+    // No override: fast path when only one backend is usable.
     if usable.len() == 1 {
         return Ok(usable[0].clone());
     }
+
+    // Two usable backends, no override: probe each and match by name.
     let matches: Vec<Backend> = usable
         .iter()
         .filter(|b| {
@@ -367,7 +455,12 @@ pub fn resolve_backend(
         .collect();
     match matches.as_slice() {
         [one] => Ok(one.clone()),
-        [] => Ok(usable[0].clone()),
+        // Box exists on no backend → it's a creation target.
+        // Delegate to Backend::detect so $CBOX_BACKEND / $DBX_CONTAINER_MANAGER
+        // are honoured (same precedence as at create time). With both vars
+        // unset, detect probes podman first and returns podman — preserving the
+        // existing default.
+        [] => Backend::detect(override_arg),
         several => Err(CboxError::usage(format!(
             "Box \"{name}\" exists on multiple backends ({}). \
              Disambiguate with --backend.",
@@ -527,6 +620,10 @@ pub fn stop(spec: &StopSpec, runner: &dyn DistroboxRunner) -> Result<StopOutcome
 pub struct RmOutcome {
     pub removed: Vec<String>,
     pub skipped: Vec<String>,
+    /// Private home directories that were deleted (when `--rm-home` was passed).
+    pub removed_homes: Vec<String>,
+    /// Private home directories that were kept (hint to user when `--rm-home` was not passed).
+    pub kept_homes: Vec<String>,
 }
 
 pub fn rm(spec: &RmSpec, runner: &dyn DistroboxRunner) -> Result<RmOutcome, CboxError> {
@@ -548,9 +645,30 @@ pub fn rm(spec: &RmSpec, runner: &dyn DistroboxRunner) -> Result<RmOutcome, Cbox
         return Err(CboxError::backend_error(out.status, &out.stderr, &out.argv));
     }
 
+    // Home cleanup: only for named boxes (--all has empty names → naturally skipped).
+    let mut removed_homes: Vec<String> = Vec::new();
+    let mut kept_homes: Vec<String> = Vec::new();
+    let data_dir = synth_data_dir();
+    let real_home = std::env::var("HOME").unwrap_or_default();
+    for name in &spec.names {
+        if let Some(path) = isolated_home_remove_target(&data_dir, name, &real_home) {
+            if spec.rm_home {
+                if std::path::Path::new(&path).exists() {
+                    // best-effort: record success; ignore individual removal failures
+                    let _ = std::fs::remove_dir_all(&path);
+                    removed_homes.push(path);
+                }
+            } else if std::path::Path::new(&path).exists() {
+                kept_homes.push(path);
+            }
+        }
+    }
+
     Ok(RmOutcome {
         removed: spec.names.clone(),
         skipped: Vec::new(),
+        removed_homes,
+        kept_homes,
     })
 }
 
@@ -579,6 +697,65 @@ const ISOLATED_UNSHARE: [&str; 2] = ["ipc", "process"];
 /// Split out from [`synth_isolated_home`] so it can be unit-tested without touching env.
 pub fn isolated_home_under(data_dir: &str, name: &str) -> String {
     format!("{data_dir}/cbox/homes/{name}")
+}
+
+/// Pure safety guard for `cbox rm --rm-home`.
+///
+/// Returns `Some(<data_dir>/cbox/homes/<name>)` ONLY when ALL of the following hold:
+/// - `name` is non-empty and contains neither `/` nor `..`;
+/// - the computed path contains the literal segment `/cbox/homes/`;
+/// - the path is not equal to `real_home` and is not an ancestor of `real_home`
+///   (i.e. `real_home` must not start with `"{path}/"`).
+///
+/// Pure string logic — no filesystem or environment access.
+pub fn isolated_home_remove_target(data_dir: &str, name: &str, real_home: &str) -> Option<String> {
+    // Reject empty, path-traversal, or slash-containing names.
+    if name.is_empty() || name.contains('/') || name.contains("..") {
+        return None;
+    }
+    let path = isolated_home_under(data_dir, name);
+    // Invariant: path must contain the sentinel segment.
+    if !path.contains("/cbox/homes/") {
+        return None;
+    }
+    // Never allow deleting the real host home or any ancestor of it.
+    if path == real_home {
+        return None;
+    }
+    let path_slash = format!("{path}/");
+    if real_home.starts_with(&path_slash) {
+        return None;
+    }
+    Some(path)
+}
+
+/// Return the synthesized isolated-home data-dir (XDG or fallback), without
+/// appending a box name — used by `rm --rm-home` to resolve the same root.
+fn synth_data_dir() -> String {
+    match std::env::var("XDG_DATA_HOME") {
+        Ok(v) if !v.is_empty() => v,
+        _ => {
+            let home = std::env::var("HOME").unwrap_or_default();
+            format!("{home}/.local/share")
+        }
+    }
+}
+
+/// Return `Some(home)` when `home` is non-empty AND differs from the real host
+/// `$HOME`.  Used to decide whether a copy step can be fulfilled on the host
+/// without touching the user's actual home directory.
+///
+/// If `$HOME` is unset or empty, any non-empty `home` is treated as private.
+pub fn private_box_home(home: Option<&str>) -> Option<String> {
+    let h = home?.trim();
+    if h.is_empty() {
+        return None;
+    }
+    let real = std::env::var("HOME").unwrap_or_default();
+    if !real.is_empty() && h == real {
+        return None;
+    }
+    Some(h.to_string())
 }
 
 /// The default private home path for an isolated box.
@@ -1396,6 +1573,18 @@ pub fn apply(
 
     // 4. Handle recreate flow
     if recreate_required && spec.recreate {
+        // Build CreateSpec first so we can pre-flight before any destructive op.
+        // This ensures a missing docker="host" socket surfaces as an error BEFORE
+        // `rm` runs — if we destroyed first and then create failed the box would
+        // be gone with no recovery path.
+        let mut create_spec = create_spec_from_boxfile_and_apply_spec(&bf, spec);
+        create_spec.env_flags = spec.recreate_env_flags.clone();
+        create_spec.env_values = spec.recreate_env_values.clone();
+        create_spec.plain_env = spec.recreate_plain_env.clone();
+
+        // Pre-flight: fail fast before the destructive rm if the socket is absent.
+        ensure_docker_host_socket(&create_spec.backend, &create_spec.docker_mode, spec.dry_run)?;
+
         // Destroy + recreate
         let rm_spec = RmSpec {
             names: vec![spec.name.clone()],
@@ -1407,22 +1596,19 @@ pub fn apply(
         };
         rm(&rm_spec, runner)?;
 
-        // Build a CreateSpec from the Boxfile, then inject any resolved persist=true
-        // secrets from the ApplySpec's recreate fields (populated by the CLI caller).
-        let mut create_spec = create_spec_from_boxfile_and_apply_spec(&bf, spec);
-        create_spec.env_flags = spec.recreate_env_flags.clone();
-        create_spec.env_values = spec.recreate_env_values.clone();
-        create_spec.plain_env = spec.recreate_plain_env.clone();
         create(&create_spec, runner)?;
 
         // Fresh box: all steps run (no state yet)
         let fresh_state = ProvisionState::new();
+        // Resolve box_home from the CreateSpec built for the recreate.
+        let recreate_box_home = private_box_home(create_spec.home.as_deref());
         return run_provision_and_build_outcome(
             spec,
             &bf,
             fresh_state,
             diff_result,
             true,
+            recreate_box_home,
             store,
             runner,
         );
@@ -1471,15 +1657,27 @@ pub fn apply(
         }
     };
 
-    run_provision_and_build_outcome(spec, &bf, state, diff_result, false, store, runner)
+    let incremental_box_home = private_box_home(live.home.as_deref());
+    run_provision_and_build_outcome(
+        spec,
+        &bf,
+        state,
+        diff_result,
+        false,
+        incremental_box_home,
+        store,
+        runner,
+    )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_provision_and_build_outcome(
     spec: &ApplySpec,
     bf: &crate::boxfile::model::Boxfile,
     mut state: ProvisionState,
     diff_result: DiffResult,
     _fresh: bool,
+    box_home: Option<String>,
     store: &dyn ProvisionStateStore,
     runner: &dyn DistroboxRunner,
 ) -> Result<ApplyOutcome, CboxError> {
@@ -1499,6 +1697,7 @@ fn run_provision_and_build_outcome(
         // caller via run_with_store before any spawn — D3 all-or-nothing guarantee).
         provision_env_keys: &spec.provision_env_keys,
         provision_env: &spec.provision_env,
+        box_home: box_home.as_deref(),
     };
 
     let step_results = match provision::provision(&plan, store, runner, &mut state) {
@@ -1793,6 +1992,7 @@ fn apply_fresh(
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."));
 
+    let fresh_box_home = private_box_home(spec.create_spec.home.as_deref());
     let plan = provision::ProvisionPlan {
         name,
         steps: &bf.provision,
@@ -1803,6 +2003,7 @@ fn apply_fresh(
         dry_run: spec.dry_run,
         provision_env_keys: &spec.provision_env_keys,
         provision_env: &spec.provision_env,
+        box_home: fresh_box_home.as_deref(),
     };
 
     let mut state = ProvisionState::new();
