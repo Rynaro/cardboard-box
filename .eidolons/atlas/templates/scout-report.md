@@ -111,7 +111,7 @@ fold_ratio:       <float>   # target ≤ 0.1
 </handoff>
 ```
 
-## 7.1 Envelope sidecar (ECL v1.0)
+## 7.1 Envelope sidecar (ECL v2.0)
 
 Emit a `scout-report.envelope.json` adjacent to this report. Use
 `templates/scout-report.envelope.json` as the skeleton. Fill all
@@ -119,7 +119,14 @@ Emit a `scout-report.envelope.json` adjacent to this report. Use
 Phase-S artefact (not a tool call — see `SPEC.md §1 I-9` and
 `skills/synthesize/SKILL.md §Envelope sidecar`).
 
-Validate against `schemas/ecl-envelope.v1.json` before marking Phase S
+The skeleton carries an `ise` block: `assertion_grade: "self-attested"`
+(scout findings are evidence-anchored per I-7 but not externally
+verified by another Eidolon) and `receiver_authorization: {auto_route:
+true, auto_merge: false, auto_deploy: false}`. Fill `ise.provenance.methodology_version`
+(`atlas-<version>`) at emit time; `ise.provenance.tool_surface` /
+`lateral_consults` are optional.
+
+Validate against `schemas/ecl-envelope.v2.json` before marking Phase S
 complete.
 
 <!-- SCOPE FIELD NOTE (for implementors):
