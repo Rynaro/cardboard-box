@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.1](https://github.com/Rynaro/cardboard-box/compare/v0.14.0...v0.14.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* honor selected container provider ([#44](https://github.com/Rynaro/cardboard-box/issues/44)) ([fcd2505](https://github.com/Rynaro/cardboard-box/commit/fcd25054ca6b4dce8eb0f26323624159ebbbe879))
+* use workflow token for release automation ([#45](https://github.com/Rynaro/cardboard-box/issues/45)) ([da7a259](https://github.com/Rynaro/cardboard-box/commit/da7a259d3e2ca010cf907d13668edc8839f3b978))
+
 ## [0.14.0](https://github.com/Rynaro/cardboard-box/compare/v0.13.0...v0.14.0) (2026-06-24)
 
 
