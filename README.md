@@ -98,12 +98,13 @@ home, image, or mounts.
 
 ### A just-works CLI
 
-Core lifecycle subcommands: `create`, `list`, `rm` (alias `destroy`), `enter` (alias `use`), `inspect` (alias `show`), `edit`, `doctor`. Plus `apply` and `up` for provisioning, `secret` for keyring-backed secrets, and `export` for surfacing apps onto the host. Global flags for scripting: `--json`, `--dry-run`, `-v` for debugging, `-y` to skip confirmations.
+Core lifecycle subcommands: `create`, `list`, `rm` (alias `destroy`), `enter` (alias `use`), `inspect` (alias `show`), `edit`, `doctor`, and `update`. Plus `apply` and `up` for provisioning, `secret` for keyring-backed secrets, and `export` for surfacing apps onto the host. Global flags for scripting: `--json`, `--dry-run`, `-v` for debugging, `-y` to skip confirmations.
 
 ```bash
 cbox list --json | jq .
 cbox apply web-dev --dry-run    # preview changes
 cbox doctor                      # health check
+cbox update --check              # check without installing
 ```
 
 ### The docker-access spectrum: `none | host | nested`
@@ -332,6 +333,7 @@ All commands honor global flags: `--json`, `-q`/`--quiet`, `-v` (show argv), `-v
 | `cbox apply <NAME>` | — | Converge a box to its Boxfile | `--file`, `--force`, `--redo <IDX>`, `--no-provision`, `--recreate`, `--dry-run`, `--json` |
 | `cbox up <NAME>` | — | Create-if-absent then apply | All create + apply flags |
 | `cbox doctor` | — | Preflight: distrobox + backend health | `--json` |
+| `cbox update` | — | Verify and install the latest target-specific release binary | `--check`, `--json` (global) |
 | `cbox secret set\|list\|rm <BOX> [KEY]` | — | Store / list / remove secrets in the OS keyring; `set` reads value from hidden prompt or stdin | `--json` |
 | `cbox export <BOX>` | — | Surface a box's app / binary / service onto the host (wraps `distrobox-export`) | `--app`, `--bin` (requires `--to`), `--to` (required with `--bin`), `--service`, `--delete`, `--list-apps`, `--list-bins`, `--json`, `--dry-run` |
 | `cbox` (no args) | `cbox tui` | Launch the TUI (TTY only) | — |
@@ -624,6 +626,13 @@ Pre-built Linux binaries are published to [GitHub Releases](https://github.com/R
 - `aarch64-unknown-linux-musl` (fully static)
 
 Versioning follows [SemVer](https://semver.org/) driven by [Conventional Commits](https://www.conventionalcommits.org/). See [RELEASING.md](RELEASING.md) for the full versioning policy and artifact verification instructions.
+
+Run `cbox update --check` to query the latest release without changing anything,
+or `cbox update` to download the archive matching the current Linux architecture
+and libc, verify it against the release's `SHA256SUMS`, and atomically replace
+the running binary. The install directory must be writable; system-wide installs
+may require running the command with the appropriate privileges. `curl` is a
+runtime prerequisite for self-update.
 
 ### Coding-agent skill
 
