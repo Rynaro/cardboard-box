@@ -1,0 +1,4 @@
+name = "project-dev"
+
+[box]
+isolated = true

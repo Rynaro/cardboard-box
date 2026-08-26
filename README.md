@@ -328,6 +328,7 @@ All commands honor global flags: `--json`, `-q`/`--quiet`, `-v` (show argv), `-v
 | `cbox enter <NAME>` | `use` | Enter a box interactively — drops you in the box's home dir; pass `--no-home` to stay in the current directory | `--root`, `--clean-path`, `--no-home` |
 | `cbox inspect <NAME>` | `show` | Inspect a box (human panel or `--json`) | `--json`, `--raw` |
 | `cbox edit <NAME>` | — | Edit a box's Boxfile in `$EDITOR` | `--file <PATH>` |
+| `cbox validate` | — | Parse and validate a Boxfile without a backend or keyring | `--file <PATH>`, `--json` (global) |
 | `cbox apply <NAME>` | — | Converge a box to its Boxfile | `--file`, `--force`, `--redo <IDX>`, `--no-provision`, `--recreate`, `--dry-run`, `--json` |
 | `cbox up <NAME>` | — | Create-if-absent then apply | All create + apply flags |
 | `cbox doctor` | — | Preflight: distrobox + backend health | `--json` |
@@ -623,6 +624,28 @@ Pre-built Linux binaries are published to [GitHub Releases](https://github.com/R
 - `aarch64-unknown-linux-musl` (fully static)
 
 Versioning follows [SemVer](https://semver.org/) driven by [Conventional Commits](https://www.conventionalcommits.org/). See [RELEASING.md](RELEASING.md) for the full versioning policy and artifact verification instructions.
+
+### Coding-agent skill
+
+The public [`cbox-boxfile`](skills/cbox-boxfile/SKILL.md) skill teaches coding
+agents to inspect a project, compose its `Boxfile.toml`, and check it with the
+real parser via `cbox validate`. It is vendor-neutral and is unrelated to this
+repository's internal agent configuration.
+
+Every release has a standalone `cbox-boxfile-skill-<version>.tar.gz` asset, and
+the same `skills/` directory is included in each binary archive. Download first,
+verify against `SHA256SUMS`, then extract—do not pipe network content to a shell:
+
+```sh
+VERSION=0.14.0 # choose a published release
+curl -fLO "https://github.com/Rynaro/cardboard-box/releases/download/v${VERSION}/cbox-boxfile-skill-${VERSION}.tar.gz"
+curl -fLO "https://github.com/Rynaro/cardboard-box/releases/download/v${VERSION}/SHA256SUMS"
+grep "  cbox-boxfile-skill-${VERSION}.tar.gz$" SHA256SUMS | sha256sum -c -
+tar -xzf "cbox-boxfile-skill-${VERSION}.tar.gz"
+```
+
+The archive expands to `skills/cbox-boxfile/`; point the coding agent at that
+directory using its normal local-skill mechanism.
 
 ---
 

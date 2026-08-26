@@ -17,6 +17,7 @@ pub mod secret;
 pub mod stop;
 pub mod tui_cmd;
 pub mod up;
+pub mod validate;
 
 /// Cwd-Boxfile auto-discovery filename.
 pub const CWD_BOXFILE: &str = "Boxfile.toml";
@@ -183,6 +184,9 @@ pub enum Commands {
 
     /// Surface a box's app, binary, or service onto the host (distrobox-export).
     Export(export::ExportArgs),
+
+    /// Parse and validate a Boxfile without contacting a container backend.
+    Validate(validate::ValidateArgs),
 
     /// Launch the terminal cockpit.
     Tui(tui_cmd::TuiArgs),
