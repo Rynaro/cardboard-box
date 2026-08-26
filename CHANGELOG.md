@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/Rynaro/cardboard-box/compare/v0.15.0...v0.16.0) (2026-08-26)
+
+
+### Features
+
+* add self-update command ([#52](https://github.com/Rynaro/cardboard-box/issues/52)) ([7b09c9a](https://github.com/Rynaro/cardboard-box/commit/7b09c9a99389b0d511505575ef0a996938eabd9c))
+
 ## [0.15.0](https://github.com/Rynaro/cardboard-box/compare/v0.14.1...v0.15.0) (2026-08-26)
 
 
