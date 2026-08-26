@@ -1,5 +1,5 @@
-use super::discover_boxfile_in;
 use super::output::OutputCtx;
+use super::{discover_boxfile_in, ensure_boxfile_name_matches};
 use crate::boxfile::validate::is_valid_name;
 use crate::boxfile::{self, model::DockerModeField};
 use crate::core::{
@@ -102,21 +102,14 @@ pub fn run_with_store(
         for w in &warnings {
             eprintln!("warn: {w}");
         }
+        ensure_boxfile_name_matches(args.name.as_deref(), &bf.name, file_path)?;
         (spec_from_boxfile_model(&bf, file_path, &backend)?, Some(bf))
-    } else if let Some(ref name) = args.name {
-        // Priority 2: positional NAME given.
-        if !is_valid_name(name) {
-            return Err(CboxError::usage(format!(
-                "Invalid box name \"{name}\". Names must match ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"
-            )));
-        }
-        (CreateSpec::new(name.clone(), backend.clone()), None)
     } else if let Some(cwd_path) = std::env::current_dir()
         .ok()
         .as_deref()
         .and_then(discover_boxfile_in)
     {
-        // Priority 3: Boxfile.toml found in the current working directory.
+        // Priority 2: matching Boxfile.toml found in the current working directory.
         if !ctx.quiet {
             ctx.hint(&format!("Using ./{cwd_path}"));
         }
@@ -124,7 +117,16 @@ pub fn run_with_store(
         for w in &warnings {
             eprintln!("warn: {w}");
         }
+        ensure_boxfile_name_matches(args.name.as_deref(), &bf.name, cwd_path)?;
         (spec_from_boxfile_model(&bf, cwd_path, &backend)?, Some(bf))
+    } else if let Some(ref name) = args.name {
+        // No Boxfile: preserve imperative positional-name creation.
+        if !is_valid_name(name) {
+            return Err(CboxError::usage(format!(
+                "Invalid box name \"{name}\". Names must match ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"
+            )));
+        }
+        (CreateSpec::new(name.clone(), backend.clone()), None)
     } else {
         return Err(CboxError::usage(
             "NAME is required unless --file is provided or a Boxfile.toml exists in the current directory.",
@@ -147,32 +149,7 @@ pub fn run_with_store(
         }
     }
 
-    // CLI flags override Boxfile
-    if args.image != "registry.fedoraproject.org/fedora-toolbox:latest" || args.file.is_none() {
-        spec.image = args.image.clone();
-    }
-    if !args.packages.is_empty() {
-        spec.packages = args.packages.clone();
-    }
-    if !args.mounts.is_empty() {
-        spec.mounts = parse_mounts(&args.mounts)?;
-    }
-    spec.docker_mode = parse_docker_mode(&args.docker)?;
-    if let Some(ref h) = args.home {
-        spec.home = Some(h.clone());
-    }
-    if let Some(ref h) = args.hostname {
-        spec.hostname = Some(h.clone());
-    }
-    if args.init {
-        spec.init = true;
-    }
-    if args.pull {
-        spec.pull = true;
-    }
-    if args.root {
-        spec.root = true;
-    }
+    apply_cli_overrides(args, resolved_bf.is_some(), &mut spec)?;
     spec.dry_run = global_dry_run;
     spec.backend = backend;
 
@@ -228,6 +205,43 @@ pub fn run_with_store(
         ctx.hint(&format!("Enter it with:  cbox enter {}", outcome.name));
     }
 
+    Ok(())
+}
+
+fn apply_cli_overrides(
+    args: &CreateArgs,
+    has_boxfile: bool,
+    spec: &mut CreateSpec,
+) -> Result<(), CboxError> {
+    // CLI flags override Boxfile. Clap's defaults are not explicit user intent,
+    // so preserve Boxfile values when those defaults are present.
+    if args.image != "registry.fedoraproject.org/fedora-toolbox:latest" || !has_boxfile {
+        spec.image = args.image.clone();
+    }
+    if !args.packages.is_empty() {
+        spec.packages = args.packages.clone();
+    }
+    if !args.mounts.is_empty() {
+        spec.mounts = parse_mounts(&args.mounts)?;
+    }
+    if args.docker != "none" || !has_boxfile {
+        spec.docker_mode = parse_docker_mode(&args.docker)?;
+    }
+    if let Some(ref h) = args.home {
+        spec.home = Some(h.clone());
+    }
+    if let Some(ref h) = args.hostname {
+        spec.hostname = Some(h.clone());
+    }
+    if args.init {
+        spec.init = true;
+    }
+    if args.pull {
+        spec.pull = true;
+    }
+    if args.root {
+        spec.root = true;
+    }
     Ok(())
 }
 
@@ -350,4 +364,79 @@ fn parse_docker_mode(s: &str) -> Result<DockerMode, CboxError> {
             "Invalid --docker \"{s}\". Use none, host, or nested."
         ))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dbox::mock::{MockResponse, MockRunner};
+
+    #[test]
+    fn boxfile_defaults_survive_create_cli_defaults_for_docker() {
+        let bf = boxfile::parse_and_validate(
+            r#"
+name = "web-dev"
+image = "ubuntu:24.04"
+docker = "nested"
+
+[box]
+home = "/tmp/web-home"
+
+[sandbox]
+unshare = "all"
+"#,
+        )
+        .unwrap()
+        .0;
+        let mut spec = spec_from_boxfile_model(&bf, "Boxfile.toml", &Backend::Docker).unwrap();
+        let args = CreateArgs {
+            name: Some("web-dev".into()),
+            image: "registry.fedoraproject.org/fedora-toolbox:latest".into(),
+            packages: vec![],
+            mounts: vec![],
+            docker: "none".into(),
+            home: None,
+            hostname: None,
+            init: false,
+            pull: false,
+            root: false,
+            isolated: false,
+            file: None,
+        };
+
+        apply_cli_overrides(&args, true, &mut spec).unwrap();
+
+        assert_eq!(spec.image, "ubuntu:24.04");
+        assert_eq!(spec.docker_mode, DockerMode::Nested);
+        assert_eq!(spec.home.as_deref(), Some("/tmp/web-home"));
+        assert_eq!(spec.unshare.as_deref(), Some("all"));
+        assert_eq!(spec.boxfile_path.as_deref(), Some("Boxfile.toml"));
+        assert_eq!(spec.backend, Backend::Docker);
+
+        spec.dry_run = true;
+        let runner = MockRunner::new().with_default(MockResponse::ok("dry run"));
+        core::create(&spec, &runner).unwrap();
+        let call = runner.calls().pop().unwrap();
+        assert!(call
+            .env
+            .iter()
+            .any(|(key, value)| key == "DBX_CONTAINER_MANAGER" && value == "docker"));
+        assert!(call
+            .args
+            .windows(2)
+            .any(|w| w[0] == "--image" && w[1] == "ubuntu:24.04"));
+        assert!(call
+            .args
+            .windows(2)
+            .any(|w| w[0] == "--home" && w[1] == "/tmp/web-home"));
+        assert!(call.args.iter().any(|arg| arg == "--unshare-all"));
+        assert!(call
+            .args
+            .iter()
+            .any(|arg| arg.contains("cbox.boxfile_path=Boxfile.toml")));
+        assert!(call
+            .args
+            .iter()
+            .any(|arg| arg.contains("cbox.docker_mode=nested")));
+    }
 }

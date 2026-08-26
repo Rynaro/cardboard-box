@@ -8,7 +8,11 @@
 //! we test the end-to-end pipeline through core:: directly with an explicit
 //! Boxfile path, matching the resolved path that would be passed through.
 
+use assert_cmd::Command;
 use cbox::cli::discover_boxfile_in;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use tempfile::TempDir;
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
@@ -17,6 +21,32 @@ fn write_boxfile(dir: &TempDir, name: &str, image: &str) -> std::path::PathBuf {
     let path = dir.path().join("Boxfile.toml");
     std::fs::write(&path, format!("name = \"{name}\"\nimage = \"{image}\"\n")).unwrap();
     path
+}
+
+fn cbox_cmd(cwd: &Path) -> Command {
+    let mut command = Command::cargo_bin("cbox").expect("cbox binary not found");
+    command.current_dir(cwd);
+    command
+}
+
+#[cfg(unix)]
+fn install_fake_engines(dir: &TempDir) -> String {
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    for engine in ["docker", "podman"] {
+        let path = bin.join(engine);
+        std::fs::write(&path, "#!/bin/sh\nprintf '[]\\n'\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let distrobox = bin.join("distrobox");
+    std::fs::write(
+        &distrobox,
+        "#!/bin/sh\n: > \"$CBOX_TEST_MARKER\"\nexit 99\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&distrobox, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let inherited = std::env::var("PATH").unwrap_or_default();
+    format!("{}:{inherited}", bin.display())
 }
 
 // ─── AC-CWD-1: helper returns Some when Boxfile.toml is present ──────────────
@@ -120,29 +150,102 @@ fn ac_cwd_5_explicit_file_wins() {
     );
 }
 
-// ─── AC-CWD-6: positional NAME wins over cwd Boxfile (resolved via helper) ───
+// ─── AC-CWD-6: matching positional NAME selects cwd Boxfile ──────────────────
 
 #[test]
-fn ac_cwd_6_explicit_name_wins() {
+fn ac_cwd_6_matching_name_uses_boxfile_create_settings() {
     let dir = TempDir::new().unwrap();
-    write_boxfile(&dir, "cwd-box", "cwd-image:latest");
+    let home = dir.path().join("private-home");
+    std::fs::write(
+        dir.path().join("Boxfile.toml"),
+        format!(
+            r#"name = "cwd-box"
+image = "ubuntu:24.04"
+docker = "nested"
 
-    let name_arg: Option<String> = Some("explicit-name".to_string());
+[box]
+home = "{}"
 
-    // Simulate resolution order: NAME is Some → use it, skip cwd discovery.
-    let used_name = if let Some(ref n) = name_arg {
-        n.clone()
-    } else if discover_boxfile_in(dir.path()).is_some() {
-        // Would parse name from Boxfile — but NAME wins.
-        "cwd-box".to_string()
-    } else {
-        panic!("no name resolved");
-    };
+[sandbox]
+unshare = "all"
+"#,
+            home.display()
+        ),
+    )
+    .unwrap();
 
-    assert_eq!(
-        used_name, "explicit-name",
-        "positional NAME must win over cwd Boxfile discovery"
+    let output = cbox_cmd(dir.path())
+        .args(["--backend", "docker", "--dry-run", "create", "cwd-box"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("--image ubuntu:24.04"), "{stdout}");
+    assert!(
+        stdout.contains(&format!("--home {}", home.display())),
+        "{stdout}"
+    );
+    assert!(stdout.contains("--unshare-all"), "{stdout}");
+    assert!(
+        stdout.contains("cbox.boxfile_path=Boxfile.toml"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("cbox.docker_mode=nested"), "{stdout}");
+}
+
+#[cfg(unix)]
+#[test]
+fn ac_cwd_6_mismatched_name_exits_64_before_mutation() {
+    let dir = TempDir::new().unwrap();
+    write_boxfile(&dir, "cwd-box", "ubuntu:24.04");
+    let marker = dir.path().join("distrobox-was-called");
+    let path = install_fake_engines(&dir);
+
+    let output = cbox_cmd(dir.path())
+        .env("PATH", path)
+        .env("CBOX_TEST_MARKER", &marker)
+        .args(["--backend", "docker", "create", "different-box"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(64));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("does not match"), "{stderr}");
+    assert!(stderr.contains("different-box"), "{stderr}");
+    assert!(stderr.contains("cwd-box"), "{stderr}");
+    assert!(
+        !marker.exists(),
+        "mismatch must fail before distrobox mutation"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn ac_cwd_6_up_matching_name_mirrors_cwd_boxfile_discovery() {
+    let dir = TempDir::new().unwrap();
+    write_boxfile(&dir, "cwd-box", "ubuntu:24.04");
+    let path = install_fake_engines(&dir);
+
+    let output = cbox_cmd(dir.path())
+        .env("PATH", path)
+        .args(["--backend", "docker", "--dry-run", "up", "cwd-box"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(combined.contains("Created box \"cwd-box\""), "{combined}");
+    assert!(combined.contains("Boxfile.toml"), "{combined}");
 }
 
 // ─── AC-CWD-7: improved usage error message contains both options ─────────────

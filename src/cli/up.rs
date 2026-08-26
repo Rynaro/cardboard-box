@@ -1,7 +1,7 @@
 //! `cbox up [NAME]` — create-if-absent then apply.
 
-use super::discover_boxfile_in;
 use super::output::OutputCtx;
+use super::{discover_boxfile_in, ensure_boxfile_name_matches};
 use crate::boxfile::model::DockerModeField;
 use crate::boxfile::{self, validate::is_valid_name};
 use crate::core::secret_inject::{resolve_secret_env, SecretScope};
@@ -143,12 +143,31 @@ pub fn run_with_store(
         for w in &warnings {
             eprintln!("warn: {w}");
         }
+        ensure_boxfile_name_matches(args.name.as_deref(), &bf.name, file_path)?;
         (
             spec_from_boxfile_model(&bf, file_path, &detected_backend)?,
             Some(bf),
         )
+    } else if let Some(cwd_path) = std::env::current_dir()
+        .ok()
+        .as_deref()
+        .and_then(discover_boxfile_in)
+    {
+        // Priority 2: matching Boxfile.toml found in the current working directory.
+        if !ctx.quiet {
+            ctx.hint(&format!("Using ./{cwd_path}"));
+        }
+        let (bf, warnings) = boxfile::parse_file(cwd_path)?;
+        for w in &warnings {
+            eprintln!("warn: {w}");
+        }
+        ensure_boxfile_name_matches(args.name.as_deref(), &bf.name, cwd_path)?;
+        (
+            spec_from_boxfile_model(&bf, cwd_path, &detected_backend)?,
+            Some(bf),
+        )
     } else if let Some(ref name) = args.name {
-        // Priority 2: positional NAME given — existing label/XDG behaviour.
+        // No Boxfile: preserve imperative positional-name creation.
         if !is_valid_name(name) {
             return Err(CboxError::usage(format!(
                 "Invalid box name \"{name}\". Names must match ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"
@@ -179,23 +198,6 @@ pub fn run_with_store(
                 plain_env: Vec::new(),
             },
             None,
-        )
-    } else if let Some(cwd_path) = std::env::current_dir()
-        .ok()
-        .as_deref()
-        .and_then(discover_boxfile_in)
-    {
-        // Priority 3: Boxfile.toml found in the current working directory.
-        if !ctx.quiet {
-            ctx.hint(&format!("Using ./{cwd_path}"));
-        }
-        let (bf, warnings) = boxfile::parse_file(cwd_path)?;
-        for w in &warnings {
-            eprintln!("warn: {w}");
-        }
-        (
-            spec_from_boxfile_model(&bf, cwd_path, &detected_backend)?,
-            Some(bf),
         )
     } else {
         return Err(CboxError::usage(
