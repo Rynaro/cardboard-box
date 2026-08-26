@@ -1,9 +1,9 @@
 {
-  "envelope_version": "1.0",
+  "envelope_version": "2.0",
   "message_id": "<UUIDv4-or-v7>",
   "thread_id":  "<inherited-from-incoming-reasoning-request>",
   "parent_id":  "<message_id-of-incoming-reasoning-request>",
-  "from": { "eidolon": "forge",       "version": "1.9.1" },
+  "from": { "eidolon": "forge",       "version": "1.10.0" },
   "to":   { "eidolon": "<requester>", "version": "<requester-version>" },
   "performative": "PROPOSE",
   "edge_origin": "roster",
@@ -22,6 +22,19 @@
     "summary": "<=200 tokens describing the verdict and confidence delta vs incoming framing."
   },
   "constraints": { "trust_level": "standard" },
+  "ise": {
+    "assertion_grade": "self-attested",
+    "provenance": {
+      "methodology_version": "forge-1.10.0",
+      "tool_surface": [],
+      "lateral_consults": []
+    },
+    "receiver_authorization": {
+      "auto_route": true,
+      "auto_merge": false,
+      "auto_deploy": false
+    }
+  },
   "expected_response": {
     "performative": "ACKNOWLEDGE",
     "shape_hint": "envelope-only"

@@ -76,7 +76,7 @@ Use for release notes, changelogs, and PR summaries — narrating what changed a
 - **Scribe version**: <version>
 - **Document type**: change-narrative
 - **Generated**: [timestamp]
-- **Source artifacts**: [list; ECL envelope sources MAY be cited as `ecl://thread/<thread_id>/message/<message_id>`]
+- **Source artifacts**: [list; ECL envelope sources MAY be cited as `ecl://thread/<thread_id>/message/<message_id>`; when the envelope carries `ise.assertion_grade`, append it, e.g. `(validated)`, so upstream work that was mechanically validated is distinguishable from work that was only self-attested]
 - **CHT scores**: C:[N]/5 H:[N]/5 T:[N]/5
 - **Coverage**: [assessment]
 - **Flags**: [any unresolved markers]
@@ -91,6 +91,7 @@ Use for release notes, changelogs, and PR summaries — narrating what changed a
 - **Breaking changes**: Always call these out prominently, even if the list is empty. Readers scan for this section specifically.
 - **Source citations**: Link each change to its source (commit, PR, ticket) so readers can drill down.
 - **Ordering within categories**: Most impactful changes first within each category.
+- **Upstream validation grade**: When a cited source arrived under a verified ECL envelope, note whether the upstream work was mechanically `validated`, only `self-attested`, or otherwise (`ise.assertion_grade`, ECL v2.0 §6.5) — a reader deciding how much to trust a change benefits from knowing whether it passed spec-mandated gates or was only reported by its own author.
 
 ---
 
