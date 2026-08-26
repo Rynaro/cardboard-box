@@ -1,0 +1,1 @@
+../../../.eidolons/kupo/skills/esl-hop/SKILL.md

@@ -1,8 +1,29 @@
 # Cortex Deep — TRANCE Tier Matrix
 
 > Load this file when evaluating or authorizing an TRANCE escalation.
-> See `EIDOLONS.md` for the always-loaded routing cortex and activation
-> gates.
+> See `EIDOLONS.md` for the always-loaded routing cortex; the Activation
+> Gates table below was relocated here from EIDOLONS.md per R-021/R-022
+> (generalist-eidolon P2 cortex re-fit) — it was mislabeled
+> "(always-loaded)" while not actually needed for single-Eidolon dispatch.
+
+---
+
+## Activation Gates
+
+TRANCE grants: parallel fan-out (max 5 branches), worktree isolation per branch, verifier-cascade wrapping, evaluator-optimizer loop (cap 3 iterations), model-tier upgrade (lead = deep, workers = light).
+
+TRANCE is **never** the default. Auto-trigger requires **both** a complexity flag AND a stakes flag. Cost warning emitted at ≥ 5× standard-tier budget.
+
+| Gate | Eidolon | Condition |
+|------|---------|-----------|
+| G1 — Discovery scatter | ATLAS | Surface > 25 files OR > 5 modules → scatter sub-agents per module, aggregate via Abstract phase |
+| G2 — Hard-decision consistency | FORGE | ≥ 3 plausible alternatives AND (high-stakes flag OR explicit TRANCE token) → N=3 reasoning traces, majority-vote |
+| G3 — Spec evaluator-optimizer | RAMZA | Complexity ≥ 7/12 AND (high-stakes OR ambiguous reqs) → generator + evaluator, max 3 iterations |
+| G4 — Parallel implementation | Vivi | RAMZA emitted > 1 independent story AND budget bounded → one Vivi per track, worktree isolation |
+| G5 — Doc parallel synthesis | IDG | Large source artifact set AND topological order allows parallelism → per-section parallel, CHT per section, one-revision cap preserved |
+| G6 — Forensic counterfactuals | VIGIL | ≥ 2 plausible root-cause hypotheses AND bisect surface allows independent testing → parallel hypothesis tests on isolated bisects |
+
+**TRANCE refusals (immutable):** A refused capability does not become available at TRANCE. ATLAS still does not write. RAMZA still does not implement. IDG still does not retrieve. FORGE still does not tool-call. VIGIL still does not auto-apply patches. Per-Eidolon retry budgets remain enforced inside TRANCE. Gilgamesh (generalist, fallback-only) has no TRANCE form — it dispatches only at `standard` tier via Step-2(a); TRANCE escalation never applies to a Step-2(a) fallthrough.
 
 ---
 
@@ -11,11 +32,14 @@
 | Eidolon | TRANCE form | Granted | Forbidden at TRANCE |
 |---|---|---|---|
 | ATLAS | Scatter sub-agents per module | Parallel fan-out (G1); worktree isolation; Abstract-phase aggregation | Writing, editing — D2 refusal stands |
+| RAMZA | Evaluator-optimizer loop on draft spec | Generator + evaluator + termination gate (G3); cap 3 iterations | Implementing code; > 3 cycles |
 | SPECTRA | Evaluator-optimizer loop on draft spec | Generator + evaluator + termination gate (G3); cap 3 iterations | Implementing code; > 3 cycles |
+| Vivi | Parallel feature branches in worktrees + verifier cascade | Multi-track implementation (G4); per-track verifier; loop shape remains bounded | Writing in a shared tree without isolation; novel architecture |
 | APIVR-Δ | Parallel feature branches in worktrees + verifier cascade | Multi-track implementation (G4); per-track verifier; reflection memory bounded ≤ 3 retries | Re-attempting beyond category budget; writing in shared tree without `isolation: worktree` |
 | IDG | Parallel doc-section synthesis | Per-section parallelism with topological respect (G5); CHT verification per section | Retrieval; > 1 revision per section |
 | FORGE | Self-consistency on reasoning chains | N=3 (or N=5 high-stakes) sampled traces with majority-vote / judge-merge (G2) | Tool calls, retrieval, code emission; debate without heterogeneity |
 | VIGIL | Parallel hypothesis testing on isolated bisects | Counterfactual fan-out on worktrees (G6); 5-intervention budget preserved | Auto-apply patches; writing outside `verified-patch.diff` |
+| Gilgamesh | None (standard-only fallback) | Bounded Step-2(a) fallthrough work | TRANCE escalation; routing, spawning, specialist or underspecified work |
 
 ---
 
@@ -28,10 +52,13 @@ The tier ladder `light < standard < deep` assigns a vendor-neutral capability le
 | Eidolon | Suggested tier | Rationale |
 |---|---|---|
 | SPECTRA | deep | Planner; spec quality gates require full reasoning |
+| RAMZA | deep | Default planner; mission-critical requirements and decision quality |
 | FORGE | deep | Deliberation; self-consistency via N=3 traces |
 | VIGIL | deep | Forensic; counterfactual chains require depth |
 | ATLAS | standard | Scout; deterministic retrieval first, LLM second |
 | APIVR-Δ | standard | Coder; `loop_native:false` — deep is benchmark-gated |
+| Vivi | standard | Default coder; iterative implementation and verification |
+| Gilgamesh | standard | Bounded fallback generalist; autonomous non-specialist work |
 | IDG | light | Scriber; synthesis from provided context |
 | Kupo | light | Executor; localized micro-tasks |
 

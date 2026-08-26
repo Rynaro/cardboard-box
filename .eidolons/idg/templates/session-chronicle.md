@@ -82,12 +82,12 @@ Use for documenting coding sessions — what happened, what changed, what was de
 
 ## Communication Lineage
 
-> OPTIONAL — Populate when source artefacts arrived inside ECL v1.0 envelopes.
+> OPTIONAL — Populate when source artefacts arrived inside ECL v2.0 envelopes.
 > Omit this section entirely when no source carried an envelope.
 
-| Step | from → to | performative | message_id | verify |
-|---|---|---|---|---|
-| 1 | … → idg | … | … | pass / fail |
+| Step | from → to | performative | message_id | verify | ise_grade |
+|---|---|---|---|---|---|
+| 1 | … → idg | … | … | pass | unverified / self-attested / validated / human-reviewed / — |
 
 ---
 
@@ -96,7 +96,7 @@ Use for documenting coding sessions — what happened, what changed, what was de
 - **Scribe version**: <version>
 - **Document type**: session-chronicle
 - **Generated**: [timestamp]
-- **Source artifacts**: [list; ECL envelope sources may be cited as `ecl://thread/<thread_id>/message/<message_id>`]
+- **Source artifacts**: [list; ECL envelope sources may be cited as `ecl://thread/<thread_id>/message/<message_id>`; when the envelope carries `ise.assertion_grade`, append it, e.g. `(validated)`, so upstream work that was mechanically validated is distinguishable from work that was only self-attested]
 - **CHT scores**: C:[N]/5 H:[N]/5 T:[N]/5
 - **Coverage**: [assessment]
 - **Flags**: [any unresolved markers]
