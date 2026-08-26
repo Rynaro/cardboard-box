@@ -108,7 +108,13 @@ pub fn create(spec: &CreateSpec, runner: &dyn DistroboxRunner) -> Result<CreateO
     };
     // Secret VALUES ride the child process environment (Invocation.env), not argv.
     // argv carries only `--env KEY` (name-only) so values never hit argv (INV-1).
-    let inv = Invocation::new("distrobox", args.clone(), mode).with_env(spec.env_values.clone());
+    // Pin distrobox to the backend cbox selected. Without this, distrobox performs
+    // its own detection and may prefer Podman even when the user chose Docker.
+    let (manager_key, manager_value) = spec.backend.dbx_env();
+    let mut env = spec.env_values.clone();
+    env.retain(|(key, _)| key != &manager_key);
+    env.push((manager_key, manager_value));
+    let inv = Invocation::new("distrobox", args.clone(), mode).with_env(env);
     let out = runner.run(inv)?;
 
     if spec.dry_run {
