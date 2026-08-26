@@ -203,6 +203,22 @@ fn ac_create_5_already_exists_error() {
     );
 }
 
+#[test]
+fn docker_ptmx_regression_remains_failure_with_actionable_hint() {
+    let runner = MockRunner::new().with_default(MockResponse::err(
+        1,
+        "Error response from daemon: openat dev/ptmx: no such device",
+    ));
+    let mut spec = make_spec("docker-box");
+    spec.backend = Backend::Docker;
+
+    let err = core::create(&spec, &runner).expect_err("failed setup must remain a failure");
+    assert_eq!(err.exit_code(), 125);
+    let message = err.to_string();
+    assert!(message.contains("Docker 29.7.0/29.7.1"), "{message}");
+    assert!(message.contains("partially created box"), "{message}");
+}
+
 // AC-CREATE-6: --dry-run → runner called with DryRun mode, no Capture spawn, stdout = argv.
 #[test]
 fn ac_create_6_dry_run() {
