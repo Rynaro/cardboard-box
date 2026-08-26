@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.15.0](https://github.com/Rynaro/cardboard-box/compare/v0.14.1...v0.15.0) (2026-08-26)
+
+
+### Features
+
+* publish Boxfile authoring skill ([#50](https://github.com/Rynaro/cardboard-box/issues/50)) ([7987f67](https://github.com/Rynaro/cardboard-box/commit/7987f67c9743748871d32c391137c5a4bd749e5b))
+
+
+### Bug Fixes
+
+* explain Docker PTMX regression ([#48](https://github.com/Rynaro/cardboard-box/issues/48)) ([57088a1](https://github.com/Rynaro/cardboard-box/commit/57088a1f7183ead761ddfbf0903fba7c1f7e7a27))
+* honor cwd Boxfile names and defaults ([#47](https://github.com/Rynaro/cardboard-box/issues/47)) ([1c108ee](https://github.com/Rynaro/cardboard-box/commit/1c108eef1ccc5cf3e427421dbbbfb4249a3cd868))
+
 ## [0.14.1](https://github.com/Rynaro/cardboard-box/compare/v0.14.0...v0.14.1) (2026-08-26)
 
 
