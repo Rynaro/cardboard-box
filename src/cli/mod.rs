@@ -17,6 +17,7 @@ pub mod secret;
 pub mod stop;
 pub mod tui_cmd;
 pub mod up;
+pub mod update;
 pub mod validate;
 
 /// Cwd-Boxfile auto-discovery filename.
@@ -187,6 +188,9 @@ pub enum Commands {
 
     /// Parse and validate a Boxfile without contacting a container backend.
     Validate(validate::ValidateArgs),
+
+    /// Check for and install a newer cbox release.
+    Update(update::UpdateArgs),
 
     /// Launch the terminal cockpit.
     Tui(tui_cmd::TuiArgs),

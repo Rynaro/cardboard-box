@@ -113,6 +113,7 @@ fn dispatch(
             cli::export::run(args, cli.json, backend_str, cli.dry_run, ctx, runner_ref)
         }
         Some(Commands::Validate(args)) => cli::validate::run(args, ctx),
+        Some(Commands::Update(args)) => cli::update::run(args, cli.dry_run, ctx),
     }
 }
 
