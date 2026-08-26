@@ -47,6 +47,35 @@ fn ac_create_1_basic_create() {
         .any(|w| w[0] == "--image" && w[1] == "fedora-toolbox:latest"));
 }
 
+// The selected creation backend must be passed to distrobox. Otherwise
+// distrobox performs its own detection and prefers Podman when both engines are
+// installed, ignoring a user's Docker choice.
+#[test]
+fn create_pins_distrobox_to_selected_docker_backend() {
+    let runner = MockRunner::new().with_default(MockResponse::ok(""));
+    let mut spec = make_spec("docker-box");
+    spec.backend = Backend::Docker;
+    spec.env_values = vec![("DATABASE_URL".to_string(), "secret".to_string())];
+
+    core::create(&spec, &runner).expect("create should succeed");
+
+    let calls = runner.calls();
+    let call = &calls[0];
+    assert!(
+        call.env
+            .iter()
+            .any(|(key, value)| key == "DBX_CONTAINER_MANAGER" && value == "docker"),
+        "create must pin distrobox to Docker, got env: {:?}",
+        call.env
+    );
+    assert!(
+        call.env
+            .iter()
+            .any(|(key, value)| key == "DATABASE_URL" && value == "secret"),
+        "backend pin must preserve existing create environment values"
+    );
+}
+
 // AC-CREATE-2: docker=host + podman backend → correct socket volume + docker-cli package.
 // dry_run=true bypasses the socket pre-flight so we can test argv assembly without a
 // live podman socket.
