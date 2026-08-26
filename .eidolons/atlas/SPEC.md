@@ -7,6 +7,9 @@
 >
 > *ATLAS is read-only by construction. If you are writing code, you are not in ATLAS.*
 
+> **Eidolon release:** v1.13.0 (see `CHANGELOG.md`) · **Methodology spec:** v1.0
+> (breaking-change axis, tracked separately — see §7 Versioning).
+
 ---
 
 ## 0. Scope and non-goals
@@ -37,7 +40,7 @@ requests. They survive model swaps.
 | I-6 | Telemetry-driven compaction | Harness tracks `context_used_pct`. At ≥60% it triggers an asynchronous fold. At ≥85% it halts and forces a checkpoint. |
 | I-7 | Evidence-anchored claims | Every claim in the scout report carries `path:line_start-line_end` + confidence tier (`H`/`M`/`L`). Unanchored claims fail validation. |
 | I-8 | Stop conditions are explicit | Decision-quality target is declared in the mission brief. ATLAS halts when target is reached; it does not keep exploring. |
-| I-9 | ECL-conformant handoffs | Phase S MUST emit a v1.0 envelope sidecar (`scout-report.envelope.json`) adjacent to the scout-report. Envelope MUST satisfy the ECL v1.0 envelope schema (`schemas/ecl-envelope.v1.json`) and the per-Eidolon scout-report profile (`schemas/scout-report-profile.v1.json`). Envelope is a terminal Phase-S artefact (same class as `scout-report.md`) — NOT a tool — preserving the I-1 read-only invariant. |
+| I-9 | ECL-conformant handoffs | Phase S MUST emit a v2.0 envelope sidecar (`scout-report.envelope.json`) adjacent to the scout-report. Envelope MUST satisfy the ECL v2.0 envelope schema (`schemas/ecl-envelope.v2.json`) and the per-Eidolon scout-report profile (`schemas/scout-report-profile.v1.json`). The envelope carries an `ise` block (`assertion_grade: "self-attested"` — ECL v2.0 §6.5) declaring the scout-report's provenance and the receiver's auto-route/auto-merge/auto-deploy authorization. Envelope is a terminal Phase-S artefact (same class as `scout-report.md`) — NOT a tool — preserving the I-1 read-only invariant. |
 
 **Why mechanical?** Model-level instructions alone are insufficient under
 long-horizon context rot. The SWE-agent, Claude Code Plan Mode, and AgentFold
@@ -174,7 +177,7 @@ finding with `confidence ≥ M` *or* is documented in `GAPS` with rationale.
 mode* for large surfaces. Scatter-Gather is the G1 TRANCE form: parallel
 read-only fan-out of Locate probes across topologically-disjoint module
 clusters, each in a clean-context subagent, merged back into `findings.md`.
-Full mechanical contract: `skills/scatter.md`.
+Full mechanical contract: `skills/scatter/SKILL.md`.
 
 **Default-or-gated.** GATED, never default. Standard-tier Locate stays serial.
 Scatter adds *parallelism only* — never a write tool, never a fresh budget,
@@ -259,7 +262,7 @@ consume.
 **Outputs.**
 
 - `scout-report.md` (see `templates/scout-report.md`) — primary structured report.
-- `scout-report.envelope.json` (see `schemas/scout-report.envelope.json`) — ECL v1.0 envelope sidecar, emitted adjacent to the scout report. Schema: `schemas/ecl-envelope.v1.json` + `schemas/scout-report-profile.v1.json`.
+- `scout-report.envelope.json` (see `schemas/scout-report.envelope.json`) — ECL v2.0 envelope sidecar, emitted adjacent to the scout report. Schema: `schemas/ecl-envelope.v2.json` + `schemas/scout-report-profile.v1.json`. Carries an `ise` block (`assertion_grade: "self-attested"`; ECL v2.0 §6.5).
 
 The envelope sidecar is a **terminal Phase-S artefact** in the same class as `scout-report.md` itself. It is NOT a tool call. Emitting it does not violate the I-1 read-only invariant.
 
@@ -294,7 +297,7 @@ sub-questions answered or explicitly marked unanswerable.
 **Purpose.** A READ-ONLY, evidence-anchored *re-run* that reuses a prior
 scout-report + its Memex store + a git-diff range to re-probe **only** the
 changed surface, carrying unchanged findings forward verbatim. Full mechanical
-contract: `skills/rescout.md`.
+contract: `skills/rescout/SKILL.md`.
 
 **Honest scope.** The delta re-scout **narrows** the staleness penalty of the
 always-on-live-index gap — it does **not close** it. ATLAS-as-a-separate-step
@@ -390,6 +393,12 @@ SWE-bench (repository-navigation subset) and `AgencyBench` when available.
 - ATLAS is allowed to recurse once: Synthesize may spawn a follow-up ATLAS
   mission if it identifies a sub-question whose decision-quality target is
   cleanly separable. Max recursion depth: 1.
+- **ESL discover hop (opt-in).** In an ESL-enabled consumer project
+  (`.spectra/` present) with a change-worthy finding, Phase S loads
+  `skills/esl-hop/SKILL.md` and frames the emitted scout-report + envelope as a
+  proposal to open an ESL change at `proposed`. ATLAS never calls a tonberry
+  write verb itself; SPECTRA's own `esl-hop` owns `propose`/`specify` on
+  receipt over the unchanged ATLAS→SPECTRA edge.
 
 ---
 
@@ -400,9 +409,9 @@ phase contract, artifact schemas, or invariants require a minor-version bump
 and a migration note.
 
 Downstream implementations SHOULD declare ATLAS version compatibility in
-their `agent.md` frontmatter.
+their `PERSONA.md` frontmatter.
 
-ATLAS targets ECL v1.0 (declared in `ECL_VERSION`). v1.0 is opt-in; live consumers MAY ignore the envelope sidecar without losing scout-report functionality.
+ATLAS targets ECL v2.0 (declared in `ECL_VERSION`). ECL adoption is opt-in; live consumers MAY ignore the envelope sidecar without losing scout-report functionality.
 
 ## 9. Memory protocol (CRYSTALIUM)
 

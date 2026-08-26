@@ -10,6 +10,7 @@ passes_used: 1
 reforged: false
 decision: ""
 reversal_conditions: []
+requires_checker: false
 ---
 
 # Root Cause Analysis: {Title}

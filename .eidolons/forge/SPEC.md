@@ -1,6 +1,6 @@
 ---
 name: reasoner
-version: 1.9.1
+version: 1.10.0
 description: "Structured deliberation specialist. Produces evidence-grounded verdicts for hard problems that resist straightforward answers."
 ---
 
@@ -42,7 +42,7 @@ F ──▶ O ──▶ R ──▶ G ──┬──▶ E (gates pass)
 
 1. **Generate ≥3 hypotheses** — genuinely distinct positions, not strawmen. Each must be defensible.
 2. **Stress-test each** — for every hypothesis, ask: "What would have to be true for this to be the best choice?" and "What evidence would disprove this?"
-3. **Score across dimensions** — load `skills/deliberation.md` for the scoring rubric.
+3. **Score across dimensions** — load `skills/deliberation/SKILL.md` for the scoring rubric.
 4. **Identify second-order effects** — consequences the requester might not have considered.
 5. **Surface [ASSUMPTION] markers** — every inference that depends on unstated premises.
 
@@ -70,18 +70,26 @@ Deliver the verdict using the appropriate template from `templates/`. Always inc
 - Conditions that would change the verdict
 - Handoff recommendations (→ SPECTRA, → APIVR-Δ, → ATLAS, → human)
 
-**ECL envelope (v1.3.0+).** When the verdict will be returned to a
-requesting Eidolon (i.e. the deliberation was triggered by an
-incoming `reasoning-request` envelope), emit the
+**ECL envelope (v1.3.0+, targeting v2.0).** When the verdict will be
+returned to a requesting Eidolon (i.e. the deliberation was triggered by
+an incoming `reasoning-request` envelope), emit the
 `reasoning-report` body and a sidecar envelope
 (`<basename>.envelope.json`) per
-[ECL v1.0 §1](https://github.com/Rynaro/eidolons-ecl/blob/v1.0.0/spec/ecl-1.0.md#1--envelope).
+[ECL v2.0 §1](https://github.com/Rynaro/eidolons-ecl/blob/v2.0.0/spec/ecl-2.0.md#1--envelope).
 The envelope's `parent_id` MUST be the `message_id` of the inbound
 request; `thread_id` MUST be inherited from the inbound request.
-Schema: `schemas/ecl-envelope.v1.json`. Body schema:
+Schema: `schemas/ecl-envelope.v2.json` (the retained
+`schemas/ecl-envelope.v1.json` validates inbound v1.x sidecars during the
+§7.3 compatibility window). Body schema:
 `schemas/reasoning-report-profile.v1.json`. Performative defaults
 to `PROPOSE`; use `CRITIQUE` only on REFORGE-reframe paths, and
-`INFORM` for no-action verdicts.
+`INFORM` for no-action verdicts. Set `ise.assertion_grade: "self-attested"`
+on the envelope (ECL v2.0 §6.5) — FORGE's Gate is self-review, not an
+externally spec-mandated check; see `skills/verification/SKILL.md` "Envelope
+Construction Checklist". Before finalizing, load
+`skills/checker-handoff/SKILL.md` and check the recommended action against its
+irreversibility trigger table; a match sets the body's `requires_checker`
+flag true.
 
 ## Structural Markers
 
@@ -100,12 +108,13 @@ Load on-demand. Do NOT pre-load.
 
 | Trigger | Skill File |
 |---------|-----------|
-| Entering Frame phase or scoping a problem | `skills/framing.md` |
-| Entering Reason phase or scoring hypotheses | `skills/deliberation.md` |
-| Entering Gate phase or verifying reasoning | `skills/verification.md` |
-| Entering a G2 / self-consistency escalation (Deep + high-stakes, or opt-in) | `skills/self-consistency.md` |
+| Entering Frame phase or scoping a problem | `skills/framing/SKILL.md` |
+| Entering Reason phase or scoring hypotheses | `skills/deliberation/SKILL.md` |
+| Entering Gate phase or verifying reasoning | `skills/verification/SKILL.md` |
+| Entering a G2 / self-consistency escalation (Deep + high-stakes, or opt-in) | `skills/self-consistency/SKILL.md` |
+| Entering Emit with a recommended action matching an irreversibility trigger marker | `skills/checker-handoff/SKILL.md` |
 
-`skills/self-consistency.md` loads **in place of** `skills/deliberation.md` for the
+`skills/self-consistency/SKILL.md` loads **in place of** `skills/deliberation/SKILL.md` for the
 Reason phase of a G2 run (see §10). It is gated, never default.
 
 ## Template Loading
@@ -189,14 +198,16 @@ EIIS-standalone-conformant and fully operational without CRYSTALIUM installed.
 
 ## 7 — ECL compatibility
 
-FORGE v1.3.0 is the first version that emits ECL v1.0 envelopes.
-The conformance contract is recorded in `ECL_VERSION` at the repo
-root. Outbound: `reasoning-report` (validated by
-`schemas/reasoning-report-profile.v1.json`). Inbound:
-`reasoning-request` (envelope validated by
-`schemas/ecl-envelope.v1.json`; body shape is methodology-owned —
-FORGE's Frame phase extracts question/context/constraints from the
-body Markdown).
+FORGE v1.3.0 was the first version to emit ECL envelopes (spec v1.0 at
+the time); FORGE now targets **ECL v2.0**. The conformance contract is
+recorded in `ECL_VERSION` at the repo root (currently `2.0`). Outbound:
+`reasoning-report` (validated by `schemas/reasoning-report-profile.v1.json`,
+which now also carries the optional `requires_checker` flag — see
+`skills/checker-handoff/SKILL.md`). Inbound: `reasoning-request` (envelope
+validated by `schemas/ecl-envelope.v2.json`, which accepts v1.0–v1.2
+envelopes through the §7.3 compatibility window in addition to v2.0; body
+shape is methodology-owned — FORGE's Frame phase extracts
+question/context/constraints from the body Markdown).
 
 FORGE's profile enforces the three P0 floors as machine-checkable
 constraints: `hypotheses_count >= 3`, `1 <= passes_used <= 3`,
@@ -211,7 +222,7 @@ per ECL §5.3.
 FORGE's TRANCE form is **self-consistency on reasoning chains** — N
 perspective-diverse, mutually-blind deliberation traces over a frozen
 Frame+Observe inventory, merged on **structural agreement**. Full protocol:
-`skills/self-consistency.md` (loads in place of `skills/deliberation.md` for the
+`skills/self-consistency/SKILL.md` (loads in place of `skills/deliberation/SKILL.md` for the
 Reason phase of a G2 run).
 
 **Gate — when it fires (never default).** Self-consistency activates ONLY when

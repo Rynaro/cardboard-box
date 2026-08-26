@@ -1,4 +1,3 @@
-
 <!-- eidolon:cortex start -->
 ## Eidolons Routing Cortex
 
