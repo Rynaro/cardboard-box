@@ -68,7 +68,7 @@ ATLAS_ACI_IMAGE_DIGEST="sha256:386677f06b0ce23cb4883f6c0f91d8eac22328cd7d9451ae2
 # ATLAS version — used as the local image tag (atlas-aci:<ATLAS_VERSION>).
 # Substituted from install.sh EIDOLON_VERSION at install time via sed.
 # DO NOT edit manually — the placeholder is replaced during `bash install.sh`.
-ATLAS_VERSION="1.12.1"
+ATLAS_VERSION="1.13.0"
 
 # ─── Logging (mirrors cli/src/lib.sh — P6: everything to stderr) ──────────
 # Kept local so this script is self-sufficient when the dispatcher exec's

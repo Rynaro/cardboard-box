@@ -80,12 +80,17 @@ guest = "/code"
 
 Then:
 ```bash
-cbox up web-dev --file Boxfile.toml
+cbox up web-dev
 cbox list
 cbox enter web-dev
 ```
 
-That's it. The box is live, provisioned, and ready.
+When `NAME` matches the `name` in the current directory's `Boxfile.toml`, both
+`create NAME` and `up NAME` use that file automatically. `create` creates the
+declared container settings; `up` additionally applies `[[provision]]` steps.
+Use `--file PATH` outside the Boxfile directory. A mismatched positional name is
+rejected instead of silently creating a box without the Boxfile's isolation,
+home, image, or mounts.
 
 ---
 

@@ -1,6 +1,8 @@
 use clap::{Parser, Subcommand};
 use std::path::Path;
 
+use crate::error::CboxError;
+
 pub mod apply;
 pub mod create;
 pub mod doctor;
@@ -31,6 +33,26 @@ pub fn discover_boxfile_in(dir: &Path) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+/// Reject an ambiguous positional NAME + Boxfile combination.
+///
+/// A matching name means the positional argument selects the cwd/explicit
+/// Boxfile. A mismatch is almost certainly accidental, and silently falling
+/// back to imperative creation would discard its home/isolation settings.
+pub fn ensure_boxfile_name_matches(
+    requested_name: Option<&str>,
+    boxfile_name: &str,
+    path: &str,
+) -> Result<(), CboxError> {
+    if let Some(requested) = requested_name {
+        if requested != boxfile_name {
+            return Err(CboxError::usage(format!(
+                "Box name \"{requested}\" does not match name \"{boxfile_name}\" in {path}."
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -65,6 +87,19 @@ mod tests {
         .unwrap();
         // Lower-case "boxfile.toml" should NOT match — we look for "Boxfile.toml".
         assert_eq!(discover_boxfile_in(dir.path()), None);
+    }
+
+    #[test]
+    fn matching_boxfile_name_is_accepted() {
+        ensure_boxfile_name_matches(Some("web-dev"), "web-dev", "Boxfile.toml").unwrap();
+    }
+
+    #[test]
+    fn mismatched_boxfile_name_is_rejected() {
+        let err = ensure_boxfile_name_matches(Some("api"), "web", "Boxfile.toml")
+            .expect_err("mismatched names must not silently ignore the Boxfile");
+        assert_eq!(err.exit_code(), crate::error::exit::USAGE);
+        assert!(err.to_string().contains("does not match"));
     }
 }
 
