@@ -1,0 +1,33 @@
+name = "project-dev"
+image = "registry.fedoraproject.org/fedora-toolbox:latest"
+packages = ["git", "make", "gcc"]
+docker = "none"
+
+[[mounts]]
+host = "/home/user/src/project"
+guest = "/workspace/project"
+mode = "rw"
+
+[sandbox]
+unshare = ["netns", "ipc"]
+init = false
+
+[box]
+hostname = "project-dev"
+pull = false
+isolated = true
+
+[[provision]]
+type = "shell"
+run = "cd /workspace/project && make bootstrap"
+
+[[provision]]
+type = "copy"
+src = "./config/example.conf"
+dst = "/home/dev/.config/project/example.conf"
+
+[env]
+LOG_LEVEL = "info"
+
+[secrets]
+API_TOKEN = { persist = false, from = "keyring" }

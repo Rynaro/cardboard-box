@@ -108,6 +108,7 @@ jobs:
           DIR="cbox-${V}-${T}"
           mkdir "$DIR"
           cp "$BIN" README.md LICENSE "$DIR"/
+          cp -R skills "$DIR"/
           tar -czf "${DIR}.tar.gz" "$DIR"
           # Bare filename in the .sha256 fragment so SHA256SUMS works with sha256sum -c
           sha256sum "${DIR}.tar.gz" > "${DIR}.tar.gz.sha256"
@@ -120,10 +121,35 @@ jobs:
             cbox-*.tar.gz
             cbox-*.tar.gz.sha256
 
+  package-skill:
+    name: package cbox-boxfile skill
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+      - name: Stage skill archive
+        run: |
+          V="${{ needs.release-please.outputs.version }}"
+          ARCHIVE="cbox-boxfile-skill-${V}.tar.gz"
+          tar -czf "$ARCHIVE" skills/cbox-boxfile
+          sha256sum "$ARCHIVE" > "${ARCHIVE}.sha256"
+      - name: Upload skill artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist-skill
+          path: |
+            cbox-boxfile-skill-*.tar.gz
+            cbox-boxfile-skill-*.tar.gz.sha256
+
   # ─── Stage 3: assemble SHA256SUMS + upload to GitHub Release ─────────────
   publish:
     name: publish assets + SHA256SUMS
-    needs: [release-please, build]
+    needs: [release-please, build, package-skill]
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
     runs-on: ubuntu-latest
     permissions:

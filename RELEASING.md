@@ -91,7 +91,8 @@ and skipped — no wasted CI minutes.
    - Creates a Git tag (`vX.Y.Z`)
    - Creates a GitHub Release
    - Triggers the `build` (matrix × 4 targets) and `publish` jobs in the
-     **same run**, uploading 4 tarballs + `SHA256SUMS` to the Release.
+     **same run**, uploading 4 binary tarballs, the public Boxfile skill archive,
+     and `SHA256SUMS` to the Release.
 
 The full pipeline from merge to published Release typically completes in under
 10 minutes.
@@ -100,7 +101,7 @@ The full pipeline from merge to published Release typically completes in under
 
 ## Artifacts
 
-Each GitHub Release contains **5 assets**:
+Each GitHub Release contains **6 assets**:
 
 | Asset | Description |
 |---|---|
@@ -108,9 +109,12 @@ Each GitHub Release contains **5 assets**:
 | `cbox-<version>-x86_64-unknown-linux-musl.tar.gz` | x86-64 Linux, fully static (musl) — widest compatibility |
 | `cbox-<version>-aarch64-unknown-linux-gnu.tar.gz` | ARM64 Linux, dynamically linked to glibc ≥ 2.28 |
 | `cbox-<version>-aarch64-unknown-linux-musl.tar.gz` | ARM64 Linux, fully static (musl) |
-| `SHA256SUMS` | SHA-256 checksums for all 4 tarballs |
+| `cbox-boxfile-skill-<version>.tar.gz` | Vendor-neutral coding-agent skill for composing Boxfiles |
+| `SHA256SUMS` | SHA-256 checksums for all 5 archives |
 
-Each tarball contains exactly: `cbox` (the binary), `README.md`, `LICENSE`.
+Each binary tarball contains `cbox`, `README.md`, `LICENSE`, and the preserved
+`skills/` catalog. The standalone skill archive expands to
+`skills/cbox-boxfile/`. `SHA256SUMS` covers all five archives.
 
 **glibc floor:** the `gnu` targets are built with `cargo-zigbuild` pinning
 glibc to **2.28** (Debian 10 / RHEL 8 / Ubuntu 18.04). If you need to run on
@@ -121,20 +125,22 @@ a system with an older glibc, use the `musl` tarball instead.
 
 ### Verifying artifacts
 
-After downloading a tarball and `SHA256SUMS` into the same directory:
+After downloading an archive and `SHA256SUMS` into the same directory, select
+the downloaded filename from the aggregate manifest:
 
 ```bash
-sha256sum -c SHA256SUMS
+ARCHIVE=cbox-0.14.0-x86_64-unknown-linux-gnu.tar.gz
+grep "  ${ARCHIVE}$" SHA256SUMS | sha256sum -c -
 ```
 
 Expected output:
 
 ```
-cbox-0.2.0-x86_64-unknown-linux-gnu.tar.gz: OK
-cbox-0.2.0-x86_64-unknown-linux-musl.tar.gz: OK
-cbox-0.2.0-aarch64-unknown-linux-gnu.tar.gz: OK
-cbox-0.2.0-aarch64-unknown-linux-musl.tar.gz: OK
+cbox-0.14.0-x86_64-unknown-linux-gnu.tar.gz: OK
 ```
+
+Set `ARCHIVE` to `cbox-boxfile-skill-<version>.tar.gz` to verify the standalone
+coding-agent skill instead.
 
 Note: binaries are **not cryptographically signed** in this release (see
 "Future hardening" below). `SHA256SUMS` provides integrity (detect corruption
