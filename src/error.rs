@@ -144,7 +144,10 @@ impl CboxError {
             .collect();
         let stderr_tail = last5.join("\n");
 
-        let headline = if stderr.contains("already exists") {
+        let headline = if stderr.contains("openat dev/ptmx: no such device") {
+            "Docker failed while Distrobox configured the container PTY. This is a known Docker 29.7.0/29.7.1 regression; upgrade Docker (or temporarily use a different Docker release/backend), remove the partially created box, and retry"
+                .to_string()
+        } else if stderr.contains("already exists") {
             let name = argv
                 .iter()
                 .skip_while(|a| a.as_str() != "--name")
