@@ -136,7 +136,13 @@ fn hex_sha256(input: &[u8]) -> String {
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    use std::fmt::Write;
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut acc, b| {
+            let _ = write!(acc, "{b:02x}");
+            acc
+        })
 }
 
 fn resolve_src(src: &str, boxfile_dir: &Path) -> PathBuf {

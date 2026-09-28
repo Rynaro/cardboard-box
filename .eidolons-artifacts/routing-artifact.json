@@ -1,0 +1,32 @@
+{
+  "decision": "dispatch",
+  "selected": ["vivi"],
+  "chain": [
+    {
+      "eidolon": "vivi",
+      "role": "coder",
+      "edge_origin": "routing"
+    }
+  ],
+  "model_tier_per_step": ["standard"],
+  "degraded_mode": "fanout",
+  "escalation": null,
+  "fallthrough_reason": null,
+  "confidence": 0.9,
+  "clarification_request": null,
+  "refusal_rerouting": false,
+  "assumptions": [],
+  "tier": "standard",
+  "route_contract": {
+    "version": "1.0",
+    "requested_operations": ["read", "write"],
+    "forbidden_operations": [],
+    "authorized_operations": ["read", "write"],
+    "enforcement": "advisory-until-host-enforced",
+    "capability_evidence": {
+      "receipt": ".eidolons/.readiness/receipt.json",
+      "state": "missing"
+    }
+  },
+  "semantic_decision_digest": "92780a18e46261d962560ee8e183ca34bdb499f3edde363ef8e2abd5af59674f"
+}

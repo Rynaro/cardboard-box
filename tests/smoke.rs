@@ -210,3 +210,117 @@ fn smoke_isolated_box_has_private_home() {
         "a file in the host home must not be visible in an isolated box"
     );
 }
+
+/// AC-RM-HOME: `cbox rm` auto-removes the synthesized home of an isolated box,
+/// and `--keep-home` preserves it.
+#[test]
+#[ignore = "requires real distrobox on PATH"]
+fn smoke_rm_isolated_home_auto_removed() {
+    use std::process::Command;
+    let name = "cbox-smoke-rm-home";
+    rm_box(name);
+
+    // Create an isolated box
+    let created = Command::new(BIN)
+        .args(["create", name, "-i", "fedora-toolbox:latest", "--isolated"])
+        .output()
+        .expect("cbox create --isolated failed to spawn");
+    assert!(
+        created.status.success(),
+        "isolated create failed: {}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+
+    // Get the expected home path
+    let data_home = std::env::var("XDG_DATA_HOME").unwrap_or_else(|_| {
+        let home = std::env::var("HOME").unwrap_or_default();
+        format!("{home}/.local/share")
+    });
+    let expected_home = format!("{data_home}/cbox/homes/{name}");
+
+    // Enter to populate the home (distrobox creates it on first enter)
+    let _ = Command::new(BIN)
+        .args(["enter", name, "--no-home", "--", "true"])
+        .output();
+
+    // Verify the home was created
+    assert!(
+        std::path::Path::new(&expected_home).exists(),
+        "isolated home should exist after enter: {expected_home}"
+    );
+
+    // Remove the box WITHOUT --keep-home (auto-remove should trigger)
+    let rm_out = Command::new(BIN)
+        .args(["rm", "-f", name])
+        .output()
+        .expect("cbox rm failed to spawn");
+    assert!(
+        rm_out.status.success(),
+        "rm failed: {}",
+        String::from_utf8_lossy(&rm_out.stderr)
+    );
+
+    // Verify the home was auto-removed
+    assert!(
+        !std::path::Path::new(&expected_home).exists(),
+        "isolated home should have been auto-removed: {expected_home}"
+    );
+}
+
+/// AC-RM-KEEP-HOME: `cbox rm --keep-home` preserves the synthesized home.
+#[test]
+#[ignore = "requires real distrobox on PATH"]
+fn smoke_rm_keep_home_preserves() {
+    use std::process::Command;
+    let name = "cbox-smoke-rm-keep";
+    rm_box(name);
+
+    // Create an isolated box
+    let created = Command::new(BIN)
+        .args(["create", name, "-i", "fedora-toolbox:latest", "--isolated"])
+        .output()
+        .expect("cbox create --isolated failed to spawn");
+    assert!(
+        created.status.success(),
+        "isolated create failed: {}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+
+    // Get the expected home path
+    let data_home = std::env::var("XDG_DATA_HOME").unwrap_or_else(|_| {
+        let home = std::env::var("HOME").unwrap_or_default();
+        format!("{home}/.local/share")
+    });
+    let expected_home = format!("{data_home}/cbox/homes/{name}");
+
+    // Enter to populate the home
+    let _ = Command::new(BIN)
+        .args(["enter", name, "--no-home", "--", "true"])
+        .output();
+
+    // Verify the home was created
+    assert!(
+        std::path::Path::new(&expected_home).exists(),
+        "isolated home should exist after enter: {expected_home}"
+    );
+
+    // Remove the box WITH --keep-home
+    let rm_out = Command::new(BIN)
+        .args(["rm", "-f", "--keep-home", name])
+        .output()
+        .expect("cbox rm failed to spawn");
+    assert!(
+        rm_out.status.success(),
+        "rm failed: {}",
+        String::from_utf8_lossy(&rm_out.stderr)
+    );
+
+    // Verify the home was preserved
+    assert!(
+        std::path::Path::new(&expected_home).exists(),
+        "isolated home should have been preserved with --keep-home: {expected_home}"
+    );
+
+    // Clean up the preserved home manually
+    let _ = std::fs::remove_dir_all(&expected_home);
+}

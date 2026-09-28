@@ -626,9 +626,11 @@ pub fn stop(spec: &StopSpec, runner: &dyn DistroboxRunner) -> Result<StopOutcome
 pub struct RmOutcome {
     pub removed: Vec<String>,
     pub skipped: Vec<String>,
-    /// Private home directories that were deleted (when `--rm-home` was passed).
+    /// Private home directories that were deleted (synthesized homes auto-removed by default,
+    /// or any home when `--rm-home` was passed).
     pub removed_homes: Vec<String>,
-    /// Private home directories that were kept (hint to user when `--rm-home` was not passed).
+    /// Private home directories that were kept (when `--keep-home` was passed, or when the
+    /// home is user-supplied and not cbox-synthesized).
     pub kept_homes: Vec<String>,
 }
 
@@ -652,20 +654,25 @@ pub fn rm(spec: &RmSpec, runner: &dyn DistroboxRunner) -> Result<RmOutcome, Cbox
     }
 
     // Home cleanup: only for named boxes (--all has empty names → naturally skipped).
+    // Auto-remove cbox-synthesized homes by default (under `<data_dir>/cbox/homes/<name>`).
+    // Keep the home if `--keep-home` is passed; never touch user-supplied --home paths.
     let mut removed_homes: Vec<String> = Vec::new();
     let mut kept_homes: Vec<String> = Vec::new();
     let data_dir = synth_data_dir();
     let real_home = std::env::var("HOME").unwrap_or_default();
     for name in &spec.names {
         if let Some(path) = isolated_home_remove_target(&data_dir, name, &real_home) {
-            if spec.rm_home {
-                if std::path::Path::new(&path).exists() {
+            if std::path::Path::new(&path).exists() {
+                // The path is a valid cbox-synthesized home that exists.
+                // Auto-remove unless --keep-home is passed.
+                // (--rm-home has no effect here since we auto-remove synthesized homes anyway)
+                if spec.keep_home {
+                    kept_homes.push(path);
+                } else {
                     // best-effort: record success; ignore individual removal failures
                     let _ = std::fs::remove_dir_all(&path);
                     removed_homes.push(path);
                 }
-            } else if std::path::Path::new(&path).exists() {
-                kept_homes.push(path);
             }
         }
     }
@@ -1596,6 +1603,7 @@ pub fn apply(
             names: vec![spec.name.clone()],
             force: true,
             rm_home: false,
+            keep_home: false,
             all: false,
             yes: true,
             backend: spec.backend.clone(),

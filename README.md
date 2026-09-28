@@ -64,6 +64,10 @@ $
 Install whatever shell, dotfiles, or app versions you like — they live in the box's
 own `$HOME`, not yours.
 
+When you remove an isolated box with `cbox rm`, its private home directory is automatically
+cleaned up (only the cbox-synthesized path under `~/.local/share/cbox/homes/`; never a
+user-supplied `--home`). Pass `--keep-home` to preserve it instead.
+
 ### Or go declarative with a Boxfile
 
 `Boxfile.toml`:
@@ -325,7 +329,7 @@ All commands honor global flags: `--json`, `-q`/`--quiet`, `-v` (show argv), `-v
 | `cbox create <NAME>` | — | Create a box imperatively or from a Boxfile | `-i/--image`, `-p/--package` (repeatable), `-m/--mount` (repeatable), `--docker none\|host\|nested`, `--home`, `--hostname`, `--init`, `--pull`, `--isolated`, `--file`, `--dry-run` |
 | `cbox list` | — | List boxes (human table or `--json`) | `-a/--all` (include non-cbox boxes), `--json` |
 | `cbox stop <NAME>...` | — | Stop one or more running boxes (non-destructive) | `-a/--all` |
-| `cbox rm <NAME>...` | `destroy` | Remove boxes (confirm unless `-y`) | `-f/--force`, `--rm-home`, `-y`, `--all` |
+| `cbox rm <NAME>...` | `destroy` | Remove boxes (confirm unless `-y`) | `-f/--force`, `--rm-home`, `--keep-home`, `-y`, `--all` |
 | `cbox enter <NAME>` | `use` | Enter a box interactively — drops you in the box's home dir; pass `--no-home` to stay in the current directory | `--root`, `--clean-path`, `--no-home` |
 | `cbox inspect <NAME>` | `show` | Inspect a box (human panel or `--json`) | `--json`, `--raw` |
 | `cbox edit <NAME>` | — | Edit a box's Boxfile in `$EDITOR` | `--file <PATH>` |
@@ -396,6 +400,8 @@ isolated = false                                      # bool, default false. pri
                                                       # $XDG_DATA_HOME/cbox/homes/<name> + process/ipc
                                                       # unshare, so host shell config/apps stay out.
                                                       # an explicit `home` above takes precedence.
+                                                      # on `cbox rm`, the synthesized home is auto-removed
+                                                      # (pass --keep-home to preserve).
 
 # --- plaintext env (optional) ---
 [env]

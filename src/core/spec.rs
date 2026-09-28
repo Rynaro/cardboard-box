@@ -104,6 +104,9 @@ pub struct RmSpec {
     pub names: Vec<String>,
     pub force: bool,
     pub rm_home: bool,
+    /// When true, preserve the private home directory even when it is a cbox-synthesized
+    /// path that would otherwise be auto-removed. Emits a hint instead of deleting.
+    pub keep_home: bool,
     pub all: bool,
     /// Tracks whether -y was passed; not used by core but part of the contract.
     #[allow(dead_code)]

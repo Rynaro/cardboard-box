@@ -93,7 +93,13 @@ pub fn env_secret_fingerprint(bf: &Boxfile) -> String {
         hasher.update(format!("{key}\n").as_bytes());
     }
     let result = hasher.finalize();
-    result.iter().map(|b| format!("{b:02x}")).collect()
+    use std::fmt::Write;
+    result
+        .iter()
+        .fold(String::with_capacity(result.len() * 2), |mut acc, b| {
+            let _ = write!(acc, "{b:02x}");
+            acc
+        })
 }
 
 /// Serializable snapshot of the secrets/env schema for diff comparison.
