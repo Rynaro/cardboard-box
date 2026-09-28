@@ -15,6 +15,7 @@ fn ac_rm_0_stop_first_ordering() {
         names: vec!["web-dev".to_string()],
         force: false,
         rm_home: false,
+        keep_home: false,
         all: false,
         yes: true,
         backend: Backend::Podman,
@@ -47,6 +48,7 @@ fn ac_rm_1_basic_rm_yes() {
         names: vec!["web-dev".to_string()],
         force: false,
         rm_home: false,
+        keep_home: false,
         all: false,
         yes: true,
         backend: Backend::Podman,
@@ -83,6 +85,7 @@ fn ac_rm_2_rm_is_called_with_spec() {
         names: vec!["web-dev".to_string()],
         force: false,
         rm_home: false,
+        keep_home: false,
         all: false,
         yes: false, // no -y, but core::rm doesn't check this — CLI does
         backend: Backend::Podman,
@@ -99,6 +102,7 @@ fn ac_rm_3_force_flag() {
         names: vec!["web-dev".to_string()],
         force: true,
         rm_home: false,
+        keep_home: false,
         all: false,
         yes: true,
         backend: Backend::Podman,
@@ -129,6 +133,7 @@ fn ac_rm_4_multiple_names() {
         names: vec!["box-a".to_string(), "box-b".to_string()],
         force: false,
         rm_home: false,
+        keep_home: false,
         all: false,
         yes: true,
         backend: Backend::Podman,
@@ -227,17 +232,17 @@ fn rm_guard_rejects_path_lacking_sentinel() {
     );
 }
 
-// ─── core::rm --rm-home (fs integration, env-isolated per-test tmp) ───────────
+// ─── core::rm home cleanup (fs integration, env-isolated per-test tmp) ───────
 
 // `core::rm` reads HOME/XDG_DATA_HOME, and these tests must mutate them. env is
-// process-global, so the two tests below are serialized against each other with
+// process-global, so the tests below are serialized against each other with
 // this lock (held across mutate → core::rm → restore) to keep them race-free
 // under cargo's default parallel test runner.
 static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-// rm_home=true removes a pre-created synth home directory.
+// AC-RM-HOME-1: synthesized home is auto-removed by default (no --keep-home).
 #[test]
-fn ac_rm_home_true_removes_home_dir() {
+fn ac_rm_home_synth_auto_removed() {
     let tmp = tempfile::TempDir::new().expect("tmp dir");
     let data_dir = tmp.path().to_str().unwrap().to_string();
     let box_name = "isolated-box";
@@ -247,14 +252,10 @@ fn ac_rm_home_true_removes_home_dir() {
     std::fs::create_dir_all(&home_path).unwrap();
     std::fs::write(format!("{home_path}/provision.json"), b"{}").unwrap();
 
-    // Serialize the env-mutation window; recover from a poisoned lock so a panic
-    // in the sibling test doesn't cascade-fail this one.
     let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
-    // Temporarily set XDG_DATA_HOME so synth_data_dir() uses our tmp dir.
     let old_xdg = std::env::var("XDG_DATA_HOME").ok();
     std::env::set_var("XDG_DATA_HOME", &data_dir);
-    // Set HOME to something outside our tmp dir so the safety guard passes.
     let old_home = std::env::var("HOME").ok();
     std::env::set_var("HOME", "/home/test-user");
 
@@ -262,7 +263,8 @@ fn ac_rm_home_true_removes_home_dir() {
     let spec = RmSpec {
         names: vec![box_name.to_string()],
         force: false,
-        rm_home: true,
+        rm_home: false, // no explicit --rm-home, but should auto-remove
+        keep_home: false,
         all: false,
         yes: true,
         backend: Backend::Podman,
@@ -270,8 +272,6 @@ fn ac_rm_home_true_removes_home_dir() {
 
     let outcome = core::rm(&spec, &runner).expect("rm should succeed");
 
-    // Restore env, then release the lock before asserting (asserts read the fs /
-    // the outcome, not env).
     match old_xdg {
         Some(v) => std::env::set_var("XDG_DATA_HOME", v),
         None => std::env::remove_var("XDG_DATA_HOME"),
@@ -284,7 +284,7 @@ fn ac_rm_home_true_removes_home_dir() {
 
     assert!(
         !std::path::Path::new(&home_path).exists(),
-        "synth home should have been removed"
+        "synth home should have been auto-removed"
     );
     assert!(
         outcome.removed_homes.contains(&home_path),
@@ -293,9 +293,9 @@ fn ac_rm_home_true_removes_home_dir() {
     assert!(outcome.kept_homes.is_empty(), "kept_homes should be empty");
 }
 
-// rm_home=false keeps the home directory and records it in kept_homes.
+// AC-RM-HOME-2: --keep-home preserves the synthesized home.
 #[test]
-fn ac_rm_home_false_keeps_home_dir() {
+fn ac_rm_home_keep_home_preserves() {
     let tmp = tempfile::TempDir::new().expect("tmp dir");
     let data_dir = tmp.path().to_str().unwrap().to_string();
     let box_name = "isolated-box2";
@@ -315,6 +315,7 @@ fn ac_rm_home_false_keeps_home_dir() {
         names: vec![box_name.to_string()],
         force: false,
         rm_home: false,
+        keep_home: true, // --keep-home preserves
         all: false,
         yes: true,
         backend: Backend::Podman,
@@ -334,7 +335,7 @@ fn ac_rm_home_false_keeps_home_dir() {
 
     assert!(
         std::path::Path::new(&home_path).exists(),
-        "synth home should still exist when --rm-home not passed"
+        "synth home should still exist when --keep-home passed"
     );
     assert!(
         outcome.kept_homes.contains(&home_path),
@@ -343,5 +344,140 @@ fn ac_rm_home_false_keeps_home_dir() {
     assert!(
         outcome.removed_homes.is_empty(),
         "removed_homes should be empty"
+    );
+}
+
+// AC-RM-HOME-3: --rm-home still works for explicit removal (same as auto).
+#[test]
+fn ac_rm_home_explicit_rm_home_removes() {
+    let tmp = tempfile::TempDir::new().expect("tmp dir");
+    let data_dir = tmp.path().to_str().unwrap().to_string();
+    let box_name = "isolated-box3";
+
+    let home_path = format!("{data_dir}/cbox/homes/{box_name}");
+    std::fs::create_dir_all(&home_path).unwrap();
+    std::fs::write(format!("{home_path}/provision.json"), b"{}").unwrap();
+
+    let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+    let old_xdg = std::env::var("XDG_DATA_HOME").ok();
+    std::env::set_var("XDG_DATA_HOME", &data_dir);
+    let old_home = std::env::var("HOME").ok();
+    std::env::set_var("HOME", "/home/test-user");
+
+    let runner = MockRunner::new().with_default(MockResponse::ok(""));
+    let spec = RmSpec {
+        names: vec![box_name.to_string()],
+        force: false,
+        rm_home: true, // explicit --rm-home
+        keep_home: false,
+        all: false,
+        yes: true,
+        backend: Backend::Podman,
+    };
+
+    let outcome = core::rm(&spec, &runner).expect("rm should succeed");
+
+    match old_xdg {
+        Some(v) => std::env::set_var("XDG_DATA_HOME", v),
+        None => std::env::remove_var("XDG_DATA_HOME"),
+    }
+    match old_home {
+        Some(v) => std::env::set_var("HOME", v),
+        None => std::env::remove_var("HOME"),
+    }
+    drop(guard);
+
+    assert!(
+        !std::path::Path::new(&home_path).exists(),
+        "synth home should have been removed with --rm-home"
+    );
+    assert!(
+        outcome.removed_homes.contains(&home_path),
+        "removed_homes should list the deleted path"
+    );
+    assert!(outcome.kept_homes.is_empty(), "kept_homes should be empty");
+}
+
+// AC-RM-HOME-4: symlinked home pointing outside managed root does NOT delete target contents.
+// The symlink at the synth path may be removed, but the external target's contents MUST survive.
+#[test]
+#[cfg(unix)]
+fn ac_rm_home_symlink_escape_preserves_target() {
+    use std::os::unix::fs::symlink;
+
+    let tmp = tempfile::TempDir::new().expect("tmp dir");
+    let data_dir = tmp.path().to_str().unwrap().to_string();
+    let box_name = "symlink-escape-box";
+
+    // Create a real directory OUTSIDE the managed root (simulates user data)
+    let external_target = format!("{}/external-user-data", tmp.path().to_str().unwrap());
+    std::fs::create_dir_all(&external_target).unwrap();
+    let sentinel_file = format!("{external_target}/precious.txt");
+    std::fs::write(&sentinel_file, b"do not delete me").unwrap();
+
+    // Create the managed homes directory structure
+    let homes_dir = format!("{data_dir}/cbox/homes");
+    std::fs::create_dir_all(&homes_dir).unwrap();
+
+    // Create a symlink at the expected synth home path pointing to the external target
+    let synth_home_path = format!("{homes_dir}/{box_name}");
+    symlink(&external_target, &synth_home_path).expect("create symlink");
+
+    let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+    let old_xdg = std::env::var("XDG_DATA_HOME").ok();
+    std::env::set_var("XDG_DATA_HOME", &data_dir);
+    let old_home = std::env::var("HOME").ok();
+    std::env::set_var("HOME", "/home/test-user");
+
+    let runner = MockRunner::new().with_default(MockResponse::ok(""));
+    let spec = RmSpec {
+        names: vec![box_name.to_string()],
+        force: false,
+        rm_home: false,
+        keep_home: false,
+        all: false,
+        yes: true,
+        backend: Backend::Podman,
+    };
+
+    let _outcome = core::rm(&spec, &runner).expect("rm should succeed");
+
+    match old_xdg {
+        Some(v) => std::env::set_var("XDG_DATA_HOME", v),
+        None => std::env::remove_var("XDG_DATA_HOME"),
+    }
+    match old_home {
+        Some(v) => std::env::set_var("HOME", v),
+        None => std::env::remove_var("HOME"),
+    }
+    drop(guard);
+
+    // CRITICAL: The external target and its contents MUST still exist.
+    // This is the key safety property — even if the synth path is a symlink
+    // to external data, we must not follow it and delete the target.
+    assert!(
+        std::path::Path::new(&external_target).exists(),
+        "external target directory must NOT be deleted"
+    );
+    assert!(
+        std::path::Path::new(&sentinel_file).exists(),
+        "external target's contents must NOT be deleted"
+    );
+    let contents = std::fs::read_to_string(&sentinel_file).unwrap();
+    assert_eq!(
+        contents, "do not delete me",
+        "external target's file contents must be preserved"
+    );
+
+    // The symlink itself is removed (fs::remove_dir_all on a symlink removes
+    // only the link, not the target, on Unix). This is acceptable behavior —
+    // the synth path no longer exists, but the external data is safe.
+    // The path appears in removed_homes because it passed the string-based
+    // guard check and existed at the synth location.
+    assert!(
+        !std::path::Path::new(&synth_home_path).exists(),
+        "the symlink at synth path should be removed"
     );
 }

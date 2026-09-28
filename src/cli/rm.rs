@@ -19,6 +19,10 @@ pub struct RmArgs {
     #[arg(long)]
     pub rm_home: bool,
 
+    /// Keep the private home directory (suppress auto-removal of cbox-synthesized homes).
+    #[arg(long, conflicts_with = "rm_home")]
+    pub keep_home: bool,
+
     /// Remove all boxes.
     #[arg(long)]
     pub all: bool,
@@ -74,6 +78,7 @@ pub fn run(
         names: args.names.clone(),
         force: args.force,
         rm_home: args.rm_home,
+        keep_home: args.keep_home,
         all: args.all,
         yes: global_yes,
         backend,
