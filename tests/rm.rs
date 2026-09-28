@@ -442,7 +442,7 @@ fn ac_rm_home_symlink_escape_preserves_target() {
         backend: Backend::Podman,
     };
 
-    let outcome = core::rm(&spec, &runner).expect("rm should succeed");
+    let _outcome = core::rm(&spec, &runner).expect("rm should succeed");
 
     match old_xdg {
         Some(v) => std::env::set_var("XDG_DATA_HOME", v),
