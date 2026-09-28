@@ -398,3 +398,86 @@ fn ac_rm_home_explicit_rm_home_removes() {
     );
     assert!(outcome.kept_homes.is_empty(), "kept_homes should be empty");
 }
+
+// AC-RM-HOME-4: symlinked home pointing outside managed root does NOT delete target contents.
+// The symlink at the synth path may be removed, but the external target's contents MUST survive.
+#[test]
+#[cfg(unix)]
+fn ac_rm_home_symlink_escape_preserves_target() {
+    use std::os::unix::fs::symlink;
+
+    let tmp = tempfile::TempDir::new().expect("tmp dir");
+    let data_dir = tmp.path().to_str().unwrap().to_string();
+    let box_name = "symlink-escape-box";
+
+    // Create a real directory OUTSIDE the managed root (simulates user data)
+    let external_target = format!("{}/external-user-data", tmp.path().to_str().unwrap());
+    std::fs::create_dir_all(&external_target).unwrap();
+    let sentinel_file = format!("{external_target}/precious.txt");
+    std::fs::write(&sentinel_file, b"do not delete me").unwrap();
+
+    // Create the managed homes directory structure
+    let homes_dir = format!("{data_dir}/cbox/homes");
+    std::fs::create_dir_all(&homes_dir).unwrap();
+
+    // Create a symlink at the expected synth home path pointing to the external target
+    let synth_home_path = format!("{homes_dir}/{box_name}");
+    symlink(&external_target, &synth_home_path).expect("create symlink");
+
+    let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+    let old_xdg = std::env::var("XDG_DATA_HOME").ok();
+    std::env::set_var("XDG_DATA_HOME", &data_dir);
+    let old_home = std::env::var("HOME").ok();
+    std::env::set_var("HOME", "/home/test-user");
+
+    let runner = MockRunner::new().with_default(MockResponse::ok(""));
+    let spec = RmSpec {
+        names: vec![box_name.to_string()],
+        force: false,
+        rm_home: false,
+        keep_home: false,
+        all: false,
+        yes: true,
+        backend: Backend::Podman,
+    };
+
+    let outcome = core::rm(&spec, &runner).expect("rm should succeed");
+
+    match old_xdg {
+        Some(v) => std::env::set_var("XDG_DATA_HOME", v),
+        None => std::env::remove_var("XDG_DATA_HOME"),
+    }
+    match old_home {
+        Some(v) => std::env::set_var("HOME", v),
+        None => std::env::remove_var("HOME"),
+    }
+    drop(guard);
+
+    // CRITICAL: The external target and its contents MUST still exist.
+    // This is the key safety property — even if the synth path is a symlink
+    // to external data, we must not follow it and delete the target.
+    assert!(
+        std::path::Path::new(&external_target).exists(),
+        "external target directory must NOT be deleted"
+    );
+    assert!(
+        std::path::Path::new(&sentinel_file).exists(),
+        "external target's contents must NOT be deleted"
+    );
+    let contents = std::fs::read_to_string(&sentinel_file).unwrap();
+    assert_eq!(
+        contents, "do not delete me",
+        "external target's file contents must be preserved"
+    );
+
+    // The symlink itself is removed (fs::remove_dir_all on a symlink removes
+    // only the link, not the target, on Unix). This is acceptable behavior —
+    // the synth path no longer exists, but the external data is safe.
+    // The path appears in removed_homes because it passed the string-based
+    // guard check and existed at the synth location.
+    assert!(
+        !std::path::Path::new(&synth_home_path).exists(),
+        "the symlink at synth path should be removed"
+    );
+}
