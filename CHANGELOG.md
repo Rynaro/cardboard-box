@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/Rynaro/cardboard-box/compare/v0.16.0...v0.17.0) (2026-09-28)
+
+
+### Features
+
+* **rm:** auto-remove isolated box home on rm, add --keep-home flag ([#56](https://github.com/Rynaro/cardboard-box/issues/56)) ([646852c](https://github.com/Rynaro/cardboard-box/commit/646852c52ef47c7c710ded19d669d0931cdbaa39))
+
 ## [0.16.0](https://github.com/Rynaro/cardboard-box/compare/v0.15.0...v0.16.0) (2026-08-26)
 
 
