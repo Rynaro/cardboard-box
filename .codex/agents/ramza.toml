@@ -2,3 +2,5 @@ name = "ramza"
 description = "RAMZA methodology agent; canonical content is installed under .eidolons/ramza."
 developer_instructions = "Load .eidolons/ramza/PERSONA.md and .eidolons/ramza/SPEC.md."
 # generated_by: eidolons
+# eidolons:managed model
+model = "gpt-5.6-sol"

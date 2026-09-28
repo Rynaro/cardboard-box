@@ -2,3 +2,5 @@ name = "idg"
 description = "IDG methodology agent; canonical content is installed under .eidolons/idg."
 developer_instructions = "Load .eidolons/idg/PERSONA.md and .eidolons/idg/SPEC.md."
 # generated_by: eidolons
+# eidolons:managed model
+model = "gpt-5.6-luna"

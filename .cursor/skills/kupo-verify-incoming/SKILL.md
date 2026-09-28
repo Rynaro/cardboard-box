@@ -1,0 +1,1 @@
+../../../.eidolons/kupo/skills/verify-incoming/SKILL.md

@@ -1,0 +1,1 @@
+../../../.eidolons/kupo/skills/patch-verify/SKILL.md

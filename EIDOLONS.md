@@ -11,63 +11,40 @@
 > tables loaded on demand.
 >
 > The `<!-- always-loaded:start/end -->` pair below marks the byte range a
-> mechanical CI check counts against the I-C4 ≤900-token budget (proxy
-> `ceil(chars/4)`, CI fails > 850 to leave headroom — see
-> `.github/workflows/ci.yml` "cortex-token-budget" and
-> `scripts/token-budget-check.sh`). Everything outside the markers is
-> on-demand and does not count.
+> mechanical CI check counts against the I-C4 ≤900-token budget. The check
+> uses a configurable chars-per-token proxy (default `--ratio 3` for Claude
+> 4.7+ which produces ~30% more tokens; use `--ratio 4` for older tokenizers).
+> CI fails > 850 to leave headroom — see `.github/workflows/ci.yml`
+> "cortex-token-budget" and `scripts/token-budget-check.sh`. Everything
+> outside the markers is on-demand and does not count.
 
 ---
 
 <!-- always-loaded:start -->
-## Roster Index
+## Roster
 
-| Name | Capability class | Trigger verbs | Refuses | Hands off to |
-|------|-----------------|---------------|---------|--------------|
-| **ATLAS** | scout | map, trace, where does, how does, investigate, analyze, audit (read-only) | implement, fix, edit, write, commit | RAMZA, Vivi, IDG |
-| **RAMZA** | planner (default) | spec, plan, decompose, clarify requirements, decision-ready | implement code, modify files | Vivi, IDG |
-| **SPECTRA** | planner (opt-in) | named dispatch only | implement code, modify files | Vivi, IDG |
-| **Vivi** | coder (default) | implement, build, fix, refactor, optimize, migrate, make tests pass | design from scratch, novel architecture | IDG |
-| **APIVR-Δ** | coder (opt-in) | named dispatch only | design from scratch, novel architecture | IDG |
-| **IDG** | scriber | document, ADR, runbook, write up, summarize | explore repo, find calls, retrieve | (terminal) |
-| **FORGE** | reasoner | trade-off, compare, evaluate, which approach | implement, retrieve, synthesize prose | (lateral) |
-| **VIGIL** | debugger | diagnose, debug, root cause, flaky, why does X fail | build new feature, plan from scratch | (lateral) |
-| **Kupo** | executor | rename, import/path fix, lockfile bump, lint autofix, one-line edit, search-replace | design, plan, cross-cutting refactor | (orchestrator-dispatched) |
-| **Gilgamesh** | generalist (fallback-only) |  | design, plan, deploy, migrate, route, spawn, underspecified | (orchestrator-dispatched; PROPOSEs upward) |
+| Name | Class | Triggers | Refuses | Handoff |
+|------|-------|----------|---------|---------|
+| ATLAS | scout | map, trace, where does, how does, investigate, analyze, audit (read-only) | implement, fix, edit, write, commit | RAMZA, Vivi, IDG |
+| RAMZA | planner (default) | spec, plan, decompose, clarify requirements, decision-ready | implement code, modify files | Vivi, IDG |
+| SPECTRA | planner (opt-in) | named dispatch only | implement code, modify files | Vivi, IDG |
+| Vivi | coder (default) | implement, build, fix, refactor, optimize, migrate, make tests pass | design from scratch, novel architecture | IDG |
+| APIVR-Δ | coder (opt-in) | named dispatch only | design from scratch, novel architecture | IDG |
+| IDG | scriber | document, ADR, runbook, write up, summarize | explore repo, find calls, retrieve | (terminal) |
+| FORGE | reasoner | trade-off, compare, evaluate, which approach | implement, retrieve, synthesize prose | (lateral) |
+| VIGIL | debugger | diagnose, debug, root cause, flaky, why does X fail | build new feature, plan from scratch | (lateral) |
+| Kupo | executor | rename, import/path fix, lockfile bump, lint autofix, one-line edit, search-replace | design, plan, cross-cutting refactor | (orchestrator-dispatched) |
+| Gilgamesh | generalist (fallback-only; zero triggers—Step-2(a) only) | | design, plan, deploy, migrate, route, spawn, underspecified | (orchestrator-dispatched; PROPOSEs upward) |
 
-> Gilgamesh carries **zero** positive trigger verbs — dispatched only via Step-2(a) fallthrough, never Step 1.
+## Dispatch
 
----
+**Default:** delegate via pipeline; orchestrator does not implement, spec, or scout directly. Direct answer only for trivial/conversational/single-fact. Tier default `standard`; TRANCE gated, never automatic.
 
-## Dispatch Protocol
-
-**Delegate by default.** Routing through the Eidolons pipeline is the default when this cortex is wired into a host; the orchestrator delegates rather than implementing, speccing, or scouting directly. Answer directly only for trivial/conversational/single-fact prompts. Tier default is `standard`; TRANCE is gated (Step 4), never automatic.
-
-**Step 1 — Classify.** Extract verbs from the prompt. Match against trigger columns above. Score each Eidolon 0–1.
-
-**Step 2 — Gate.**
-- Score ≥ 0.8 for one Eidolon, ≤ 1 verb class: dispatch that Eidolon, standard tier.
-- Score ≥ 0.6 for ≥ 2 Eidolons OR prompt spans ≥ 2 classes: build a chain (see Chain Templates).
-- No Eidolon scores ≥ 0.6 — split (predicate detail: `methodology/cortex/dispatch-predicate.md`):
-  - **(a) actionable**: dispatch **Gilgamesh**, standard tier, bounded-authority fallthrough worker.
-  - **(b) underspecified**: emit `clarification_request` (1–3 questions). Do not dispatch.
-  - Invariant: Gilgamesh never enters Step 1 and never outranks a specialist scoring ≥ τ.
-
-**Step 3 — Refusal check.** If the top-scored Eidolon would refuse the prompt's intent, reroute to the capable peer and emit `[DECISION]` explaining the override.
-
-**Step 4 — Tier.** Default `standard`. Escalate to `trance` only when a complexity flag AND a stakes flag both hold (see TRANCE Activation Gates).
-
-**Step 5 — Emit routing artifact.**
-```
-selected: [<eidolon>, ...]
-tier: standard | trance
-chain: [{eidolon, role, hand_off_artifact_path, edge_origin}, ...]
-model_tier_per_step: [light | standard | deep, ...]
-confidence: 0..1
-assumptions: [...]
-clarification_request: <string?>
-refusal_rerouting: <bool>
-```
+1. **Classify** — extract verbs, match triggers, score 0–1.
+2. **Gate** — ≥0.8 one Eidolon, ≤1 verb class: dispatch standard. ≥0.6 for ≥2 OR spans ≥2 classes: chain (`chain-templates.md`). <0.6 all (`dispatch-predicate.md`): (a) actionable → Gilgamesh; (b) underspecified → `clarification_request` (1–3 questions), do NOT dispatch. Gilgamesh never enters Step 1, never outranks specialist ≥τ.
+3. **Refusal** — top Eidolon refuses → reroute + emit `[DECISION]`.
+4. **Tier** — default `standard`; `trance` only with complexity AND stakes flags (`trance-matrix.md`).
+5. **Artifact** — emit (`routing-artifact.md`): `{selected, tier, chain:[{eidolon, role, hand_off_artifact_path, edge_origin}], model_tier_per_step, confidence, assumptions, clarification_request?, refusal_rerouting}`.
 <!-- always-loaded:end -->
 
 ---
@@ -141,7 +118,7 @@ When `crystalium` is installed (`grants_to_eidolons: all`), every dispatched Eid
 - **I-C1** — Marker-bounded sections when embedding into shared host files (`<!-- eidolon:cortex start/end -->`).
 - **I-C2** — No `eval` of routing rules; descriptor table is data, dispatch is interpretive.
 - **I-C3** — Capability classes + vendor-neutral tiers only (`light < standard < deep`). Never vendor model names.
-- **I-C4** — Always-loaded section (`<!-- always-loaded:start/end -->`) ≤ 900 tokens; deep tables in `methodology/cortex/`. CI enforces a conservative `chars/4 ≤ 850` proxy ceiling on the marker-bounded bytes.
+- **I-C4** — Always-loaded section (`<!-- always-loaded:start/end -->`) ≤ 900 tokens; deep tables in `methodology/cortex/`. CI enforces a conservative proxy ceiling (default `chars/3 ≤ 850` for Claude 4.7+ tokenizer; use `--ratio 4` for older tokenizers).
 - **I-C5** — Refusals are immutable; cortex must never request a refused capability of a target Eidolon.
 - **I-C6** — Same prompt + same context + same roster ⇒ same routing decision.
 - **I-C7** — `roster/index.yaml` is the source of truth; new Eidolons auto-appear, removed Eidolons disappear. `roster/mcps.yaml` is the closed MCP catalogue; `eidolons mcp list|show|install|refresh|uninstall|upgrade|sync|health|run` is the unified verb set (v1.3+).
