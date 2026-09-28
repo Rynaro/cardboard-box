@@ -1,0 +1,1 @@
+../../../.eidolons/kupo/skills/keep-or-kick/SKILL.md

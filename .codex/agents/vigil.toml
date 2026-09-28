@@ -2,3 +2,5 @@ name = "vigil"
 description = "VIGIL methodology agent; canonical content is installed under .eidolons/vigil."
 developer_instructions = "Load .eidolons/vigil/PERSONA.md and .eidolons/vigil/SPEC.md."
 # generated_by: eidolons
+# eidolons:managed model
+model = "gpt-5.6-sol"

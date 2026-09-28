@@ -4,7 +4,7 @@
 
 version: 1
 hosts:
-  wire: [claude-code, codex]
+  wire: [claude-code, codex, cursor]
   shared_dispatch: true
   strict: false
   pointer_targets: [AGENTS.md, CLAUDE.md]

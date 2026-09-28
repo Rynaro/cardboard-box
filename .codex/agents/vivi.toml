@@ -2,3 +2,5 @@ name = "vivi"
 description = "VIVI methodology agent; canonical content is installed under .eidolons/vivi."
 developer_instructions = "Load .eidolons/vivi/PERSONA.md and .eidolons/vivi/SPEC.md."
 # generated_by: eidolons
+# eidolons:managed model
+model = "gpt-5.6-terra"
